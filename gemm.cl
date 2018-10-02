@@ -47,10 +47,10 @@
 
 __kernel 
 __attribute__((reqd_work_group_size(BLOCKS_IN_TILE_Y, BLOCKS_IN_TILE_X, 1)))
-void    sgemm(    int M,int N,int K,
-        __global const float * restrict A, int lda,
-        __global const float * restrict B, int ldb
-        __global float * restrict C,int ldc)
+void    sgemm(    int M,/*int N,int K,*/
+        __global const float * restrict A,// int lda,
+        __global const float * restrict B,// int ldb,
+        __global float * restrict C/*,int ldc*/)
 {
     ALIGN_FLOAT4 __local real a_tile[TILE_SIZE_K][TILE_SIZE];
     ALIGN_FLOAT4

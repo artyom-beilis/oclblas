@@ -47,9 +47,10 @@ public:
             return;
         v=atoi(getenv(s));
     }
-    virtual void config(int M,bool Atr,bool Btr)
+    virtual void config(int M,int N,int K,bool Atr,bool Btr)
     {
-
+	if(M!=N || M!=K)
+		throw std::runtime_error("Non Squae Matrices");
         M_= M;
         Atr_ = Atr;
         Btr_ = Btr;

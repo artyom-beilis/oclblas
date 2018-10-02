@@ -14,7 +14,7 @@ sgemm_base *get_cublas();
 sgemm_base *get_clblast();
 sgemm_base *get_clblas();
 sgemm_base *get_viennacl();
-//sgemm_base *get_my();
+sgemm_base *get_my();
 //sgemm_base *get_mycuda();
 
 sgemm_base *get(std::string const &name)
@@ -29,9 +29,9 @@ sgemm_base *get(std::string const &name)
         return get_clblas();
     if(name == "viennacl")
         return get_viennacl();
-/*    if(name == "my")
+    if(name == "my")
         return get_my();
-    if(name == "mycuda")
+/*    if(name == "mycuda")
         return get_mycuda();*/
     return nullptr;
 }
