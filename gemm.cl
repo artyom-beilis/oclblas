@@ -1,0 +1,236 @@
+// vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
+#ifndef TILE_SIZE
+#define TILE_SIZE 32
+#endif
+#ifndef BLOCK_SIZE_X
+#define BLOCK_SIZE_X 2
+#endif
+#ifndef BLOCK_SIZE_Y
+#define BLOCK_SIZE_Y 4
+#endif
+
+#ifndef TILE_SIZE_K
+#define TILE_SIZE_K TILE_SIZE
+#endif 
+
+#define BLOCK_SIZE_XY (BLOCK_SIZE_X*BLOCK_SIZE_Y)
+#define BLOCKS_IN_TILE_X (TILE_SIZE / BLOCK_SIZE_X)
+#define BLOCKS_IN_TILE_Y (TILE_SIZE / BLOCK_SIZE_Y)
+
+//#define INV_LOOP
+
+#define ALIGN_FLOAT4 __attribute__ ((aligned (16)))
+
+//#define SIM
+//#define SIM2
+
+
+//#define INV_B
+#if BLOCK_SIZE_X >= 4
+//#define USE_FLOAT4_LOAD_X
+#endif
+
+#if 0
+#define real half
+#define real4 half4
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#endif
+
+#ifndef real
+#define real float
+#define real4 float4
+#endif
+
+
+//#define DUMMY_OPER
+#ifndef DUMMY_OPER
+
+__kernel 
+__attribute__((reqd_work_group_size(BLOCKS_IN_TILE_Y, BLOCKS_IN_TILE_X, 1)))
+void    sgemm(    int M,int N,int K,
+        __global const float * restrict A, int lda,
+        __global const float * restrict B, int ldb
+        __global float * restrict C,int ldc)
+{
+    ALIGN_FLOAT4 __local real a_tile[TILE_SIZE_K][TILE_SIZE];
+    ALIGN_FLOAT4
+    #ifdef INV_B
+    __local real b_tile[TILE_SIZE][TILE_SIZE_K];
+    #else
+    __local real b_tile[TILE_SIZE_K][TILE_SIZE];
+    #endif
+
+    real c[BLOCK_SIZE_Y][BLOCK_SIZE_X];
+    real bp[BLOCK_SIZE_X];
+    real av;
+    
+    int row = get_global_id(0) * BLOCK_SIZE_Y;
+    int col = get_global_id(1) * BLOCK_SIZE_X;
+
+    int lid0 = get_local_id(0);
+    int lid1 = get_local_id(1);
+    
+    int block_row = get_local_id(0)*BLOCK_SIZE_Y;
+    int block_col = get_local_id(1)*BLOCK_SIZE_X;
+    
+    #pragma unroll
+    for(int i=0;i<BLOCK_SIZE_Y;i++) { 
+        #pragma unroll
+        for(int j=0;j<BLOCK_SIZE_X;j++) { 
+            c[i][j]=0.0f;
+        }
+    }
+    #ifdef SIM
+    {
+        
+        int full_lid = lid0 * get_local_size(1) + lid1;
+        #pragma unroll
+        for(int i=full_lid;i<TILE_SIZE_K*TILE_SIZE;i+=BLOCKS_IN_TILE_Y*BLOCKS_IN_TILE_X) {
+            int kdim = i / TILE_SIZE;
+            int tdim = i % TILE_SIZE;
+            a_tile[kdim][tdim] = 2.0f;
+            b_tile[kdim][tdim] = 3.0f;
+        }
+    }
+    #endif
+
+    const int k_steps_y = TILE_SIZE_K / BLOCKS_IN_TILE_Y;
+    int k_offset_row = lid0 * k_steps_y;
+    const int k_steps_x = TILE_SIZE_K / BLOCKS_IN_TILE_X;
+    int k_offset_col = lid1 * k_steps_x;
+
+
+    int k=0;
+    for(k=0;k<M;k+=TILE_SIZE_K) {
+
+    #ifndef SIM
+
+        #pragma unroll
+        for(int dr=0;dr<k_steps_y;dr++) {
+            #ifdef USE_FLOAT4_LOAD_X
+                   #pragma unroll
+                for(int dc=0;dc<BLOCK_SIZE_X;dc+=4) {
+                    *(__local real4 *)(&b_tile[k_offset_row + dr][block_col + dc]) = *(__global real4 const * restrict)&B[(k+k_offset_row+dr)*M+col+dc]; 
+                }
+            #else
+                for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+                    #ifdef INV_B
+                    b_tile[block_col + dc][k_offset_row + dr] = B[(k+k_offset_row+dr)*M+col+dc]; 
+                    #else
+                    b_tile[k_offset_row + dr][block_col + dc] = B[(k+k_offset_row+dr)*M+col+dc]; 
+                    #endif
+                }
+            #endif
+        }
+        #pragma unroll
+        for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+               #pragma unroll
+            for(int dc=0;dc<k_steps_x;dc++) {
+                a_tile[k_offset_col + dc][block_row + dr] = A[(row+dr)*M+k+k_offset_col+dc];
+            }
+        }
+
+        barrier(CLK_LOCAL_MEM_FENCE);
+    #endif
+
+        
+        #pragma unroll
+        for(int dk=0;dk<TILE_SIZE_K;dk++) {
+            
+            #pragma unroll
+            for(int dc=0;dc<BLOCK_SIZE_X;dc++)
+                #ifdef INV_B
+                bp[dc] = b_tile[block_col+dc][dk];
+                #else
+                bp[dc] = b_tile[dk][block_col+dc];
+                #endif
+
+            #pragma unroll
+            for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+                av =  a_tile[dk][block_row+dr];
+                #pragma unroll
+                for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+                    c[dr][dc] = mad(av,bp[dc],c[dr][dc]);
+                }
+            }
+        }
+
+           barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    #pragma unroll
+    for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        #pragma unroll
+        for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            C[(row+dr)*M+col+dc] = c[dr][dc];
+        }
+    }
+
+
+}
+
+#else
+// DUMMY_OPER
+__kernel 
+__attribute__((reqd_work_group_size(BLOCKS_IN_TILE_Y, BLOCKS_IN_TILE_X, 1)))
+void    sgemm(    int M,
+        __global const float * restrict A,
+        __global const float * restrict B,
+        __global float * restrict C)
+{
+    //real a=2.0;
+    //real b=3.0;
+
+    real a[BLOCK_SIZE_Y][BLOCK_SIZE_X];
+    real b[BLOCK_SIZE_Y][BLOCK_SIZE_X];
+    real c[BLOCK_SIZE_Y][BLOCK_SIZE_X];
+    int row = get_global_id(0) * BLOCK_SIZE_Y;
+    int col = get_global_id(1) * BLOCK_SIZE_X;
+    
+    #pragma unroll
+    for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        #pragma unroll
+        for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            a[dr][dc]=A[(row+dr)*M+col+dc];
+            b[dr][dc]=B[(row+dr)*M+col+dc];
+            //a[dr][dc]=A[dr*BLOCK_SIZE_Y+dc];
+            //b[dr][dc]=B[dr*BLOCK_SIZE_Y+dc];
+            //a[dr][dc]=A[dr*BLOCK_SIZE_Y+dc];
+            //b[dr][dc]=B[dr*BLOCK_SIZE_Y+dc];
+        }
+    }
+ 
+    #pragma unroll
+    for(int i=0;i<BLOCK_SIZE_Y;i++) { 
+        #pragma unroll
+        for(int j=0;j<BLOCK_SIZE_X;j++) { 
+            c[i][j]=0.0f;
+        }
+    }
+    
+    for(int k=0;k<M/TILE_SIZE_K;k++) {
+        #pragma unroll
+        for(int k2=0;k2<TILE_SIZE_K;k2++) {
+            #pragma unroll
+            for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+                #pragma unroll
+                for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+                    c[dr][dc] = mad(a[dr][dc],b[dr][dc],c[dr][dc]);
+                }
+            }
+        }
+    }
+    
+    #pragma unroll
+    for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        #pragma unroll
+        for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            C[(row+dr)*M+col+dc] = (float)c[dr][dc];
+        }
+    }
+
+
+}
+
+#endif
+
