@@ -49,14 +49,14 @@ public:
     }
     virtual void config(int M,int N,int K,bool Atr,bool Btr)
     {
-	if(M!=N || M!=K)
-		throw std::runtime_error("Non Squae Matrices");
         M_= M;
+	N_= N;
+	K_= K;
         Atr_ = Atr;
         Btr_ = Btr;
-        a_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*M*sizeof(float)));
-        b_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*M*sizeof(float)));
-        c_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*M*sizeof(float)));
+        a_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*K*sizeof(float)));
+        b_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, K*N*sizeof(float)));
+        c_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*N*sizeof(float)));
 
 
         std::ostringstream opts;
@@ -141,10 +141,10 @@ public:
         kernel_ = std::move(cl::Kernel(program_, "sgemm"));
     }
     virtual void set_A(float const *A) { 
-        queue_.enqueueWriteBuffer(a_, CL_TRUE, 0, M_*M_*sizeof(float), A);
+        queue_.enqueueWriteBuffer(a_, CL_TRUE, 0, M_*K_*sizeof(float), A);
     }
     virtual void set_B(float const *B) { 
-        queue_.enqueueWriteBuffer(b_, CL_TRUE, 0, M_*M_*sizeof(float), B);
+        queue_.enqueueWriteBuffer(b_, CL_TRUE, 0, K_*N_*sizeof(float), B);
     }
     virtual void set_C(float *C) { 
         c_host_ = C;
@@ -154,11 +154,16 @@ public:
         int rc=0;
         int ind=0;
         kernel_.setArg(ind++,M_);
+        kernel_.setArg(ind++,N_);
+        kernel_.setArg(ind++,K_);
         kernel_.setArg(ind++,a_);
+        kernel_.setArg(ind++,K_);
         kernel_.setArg(ind++,b_);
+        kernel_.setArg(ind++,N_);
         kernel_.setArg(ind++,c_);
+        kernel_.setArg(ind++,N_);
         
-        cl::NDRange global(M_/block_size_y_,M_/block_size_x_);
+        cl::NDRange global(M_/block_size_y_,N_/block_size_x_);
         cl::NDRange local(tile_size_ / block_size_y_,tile_size_ / block_size_x_);
         rc=queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, global,local,nullptr,nullptr);
 
@@ -169,10 +174,10 @@ public:
         queue_.finish();
     }
     virtual void copy_back() {
-        queue_.enqueueReadBuffer(c_,CL_TRUE,0,M_*M_*sizeof(float),c_host_);
+        queue_.enqueueReadBuffer(c_,CL_TRUE,0,M_*N_*sizeof(float),c_host_);
     }
 private:
-    int M_;
+    int M_,N_,K_;
     bool Atr_;
     bool Btr_;
     cl::Buffer a_,b_,c_,tmp1_,tmp2_;
