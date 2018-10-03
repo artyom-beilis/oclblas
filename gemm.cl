@@ -17,18 +17,8 @@
 #define BLOCKS_IN_TILE_X (TILE_SIZE / BLOCK_SIZE_X)
 #define BLOCKS_IN_TILE_Y (TILE_SIZE / BLOCK_SIZE_Y)
 
-//#define INV_LOOP
-
 #define ALIGN_FLOAT4 __attribute__ ((aligned (16)))
 
-//#define SIM
-//#define SIM2
-
-
-//#define INV_B
-#if BLOCK_SIZE_X >= 4
-//#define USE_FLOAT4_LOAD_X
-#endif
 
 
 __kernel 
@@ -40,11 +30,7 @@ void    sgemm(    int M,int N,int K,
 {
     ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][TILE_SIZE];
     ALIGN_FLOAT4
-    #ifdef INV_B
-    __local float b_tile[TILE_SIZE][TILE_SIZE_K];
-    #else
     __local float b_tile[TILE_SIZE_K][TILE_SIZE];
-    #endif
 
     float c[BLOCK_SIZE_Y][BLOCK_SIZE_X];
     float bp[BLOCK_SIZE_X];
@@ -77,12 +63,9 @@ void    sgemm(    int M,int N,int K,
     for(k=0;k<K;k+=TILE_SIZE_K) {
         #pragma unroll
         for(int dr=0;dr<k_steps_y;dr++) {
+            #pragma unroll
             for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
-                #ifdef INV_B
-                b_tile[block_col + dc][k_offset_row + dr] = B[(k+k_offset_row+dr)*ldb+col+dc]; 
-                #else
                 b_tile[k_offset_row + dr][block_col + dc] = B[(k+k_offset_row+dr)*ldb+col+dc]; 
-                #endif
             }
         }
         #pragma unroll
@@ -96,16 +79,12 @@ void    sgemm(    int M,int N,int K,
         barrier(CLK_LOCAL_MEM_FENCE);
 
         
-        #pragma unroll
-        for(int dk=0;dk<TILE_SIZE_K;dk++) {
+        int lmt = min(K-k,TILE_SIZE_K);
+        for(int dk=0;dk<lmt;dk++) {
             
             #pragma unroll
             for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
-                #ifdef INV_B
-                bp[dc] = b_tile[block_col+dc][dk];
-                #else
                 bp[dc] = b_tile[dk][block_col+dc];
-                #endif
             }
 
             #pragma unroll

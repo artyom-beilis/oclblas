@@ -91,17 +91,7 @@ public:
         std::cerr << opts.str() << std::endl;
         
         std::ifstream tmp;
-        if(getenv("GEN")) {
-                remove("k.cl");
-            char call[256];
-            snprintf(call,sizeof(call),"php5 generator.php %d %d %d %d >k.cl",tile_size_,tile_size_k_,block_size_x_,block_size_y_);
-            if(system(call)!=0) {
-                throw std::runtime_error("System failed " + std::string(call));
-            }
-            tmp.open("k.cl");
-        }
-        else
-            tmp.open("gemm.cl");
+        tmp.open("gemm.cl");
         
         if(!tmp) {
             throw std::runtime_error("Failed to open k.cl");
@@ -149,6 +139,10 @@ public:
     virtual void set_C(float *C) { 
         c_host_ = C;
     }
+    static int round_up_div(int x,int y)
+    {
+        return (x + y - 1)/y;
+    }
     virtual void calc()
     {
         int rc=0;
@@ -163,7 +157,7 @@ public:
         kernel_.setArg(ind++,c_);
         kernel_.setArg(ind++,N_);
         
-        cl::NDRange global(M_/block_size_y_,N_/block_size_x_);
+        cl::NDRange global(round_up_div(M_,block_size_y_),round_up_div(N_,block_size_x_));
         cl::NDRange local(tile_size_ / block_size_y_,tile_size_ / block_size_x_);
         rc=queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, global,local,nullptr,nullptr);
 
