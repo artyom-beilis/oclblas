@@ -29,10 +29,9 @@ void    sgemm(    int M,int N,int K,
         __global float * restrict C,int ldc)
 {
     ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][TILE_SIZE];
-    ALIGN_FLOAT4
-    __local float b_tile[TILE_SIZE_K][TILE_SIZE];
+    ALIGN_FLOAT4 __local float b_tile[TILE_SIZE_K][TILE_SIZE];
 
-    float c[BLOCK_SIZE_Y][BLOCK_SIZE_X];
+    float c[BLOCK_SIZE_Y][BLOCK_SIZE_X] = {{0.0f}};
     float bp[BLOCK_SIZE_X];
     float av;
     
@@ -44,14 +43,6 @@ void    sgemm(    int M,int N,int K,
     
     int block_row = get_local_id(0)*BLOCK_SIZE_Y;
     int block_col = get_local_id(1)*BLOCK_SIZE_X;
-    
-    #pragma unroll
-    for(int i=0;i<BLOCK_SIZE_Y;i++) { 
-        #pragma unroll
-        for(int j=0;j<BLOCK_SIZE_X;j++) { 
-            c[i][j]=0.0f;
-        }
-    }
 
     const int k_steps_y = TILE_SIZE_K / BLOCKS_IN_TILE_Y;
     int k_offset_row = lid0 * k_steps_y;
@@ -77,7 +68,6 @@ void    sgemm(    int M,int N,int K,
         }
 
         barrier(CLK_LOCAL_MEM_FENCE);
-
         
         int lmt = min(K-k,TILE_SIZE_K);
         for(int dk=0;dk<lmt;dk++) {
@@ -95,9 +85,9 @@ void    sgemm(    int M,int N,int K,
                     c[dr][dc] = mad(av,bp[dc],c[dr][dc]);
                 }
             }
-       }
+        }
 
-       barrier(CLK_LOCAL_MEM_FENCE);
+        barrier(CLK_LOCAL_MEM_FENCE);
     }
 
     #pragma unroll
