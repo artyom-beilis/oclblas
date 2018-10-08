@@ -1,3 +1,4 @@
+// vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #include <CL/cl.hpp>
 #include <math.h>
 #include "sgemm_base.h"
@@ -50,8 +51,8 @@ public:
     virtual void config(int M,int N,int K,bool Atr,bool Btr)
     {
         M_= M;
-	N_= N;
-	K_= K;
+        N_= N;
+        K_= K;
         Atr_ = Atr;
         Btr_ = Btr;
         a_ = std::move(cl::Buffer(context_, CL_MEM_READ_WRITE, M*K*sizeof(float)));
@@ -70,14 +71,17 @@ public:
 	subst(block_size_x_,"BLOCK_X");
     tile_size_k_ = tile_size_;
     subst(tile_size_k_,"TILE_SIZE_K");
-    int bin_y = tile_size_ /block_size_y_;
-    int bin_x = tile_size_ /block_size_x_;
-    if(tile_size_k_ % bin_y != 0 || tile_size_k_ % bin_x !=0) {
+    int wg_size = (tile_size_  * tile_size_ / block_size_x_ / block_size_y_);
+    if(tile_size_ * tile_size_k_ % wg_size != 0) {
+        std::cerr <<"FIXING TILE SIZE!!" << std::endl;
+        //tile_size_k_ = tile_size_*tile_size_ / block_size_x_ / block_size_y_;
+        throw std::runtime_error("Inv");
+    }
+    /*if(tile_size_k_ % bin_y != 0 || tile_size_k_ % bin_x !=0) {
         std::cerr <<"FIXING TILE SIZE!!" << std::endl;
         tile_size_k_ = tile_size_;
-    }
+    }*/
 
-	tile_size_ = std::min(M_,tile_size_);
 	block_size_x_ = std::min(tile_size_,block_size_x_);
 	block_size_y_ = std::min(tile_size_,block_size_y_);
 
@@ -151,14 +155,18 @@ public:
         kernel_.setArg(ind++,N_);
         kernel_.setArg(ind++,K_);
         kernel_.setArg(ind++,a_);
-        kernel_.setArg(ind++,K_);
+        kernel_.setArg(ind++,(!Atr_ ? K_ : M_ ));
         kernel_.setArg(ind++,b_);
-        kernel_.setArg(ind++,N_);
+        kernel_.setArg(ind++,(!Btr_ ? N_ : K_ ));
         kernel_.setArg(ind++,c_);
         kernel_.setArg(ind++,N_);
-        
-        cl::NDRange global(round_up_div(M_,block_size_y_),round_up_div(N_,block_size_x_));
-        cl::NDRange local(tile_size_ / block_size_y_,tile_size_ / block_size_x_);
+       
+        int ls0 = tile_size_ / block_size_y_;
+        int ls1 = tile_size_ / block_size_x_; 
+        int gs0 = round_up_div(M_,tile_size_) * tile_size_ / block_size_y_;
+        int gs1 = round_up_div(N_,tile_size_) * tile_size_ / block_size_x_;
+        cl::NDRange global(gs0,gs1);
+        cl::NDRange local(ls0,ls1);
         rc=queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, global,local,nullptr,nullptr);
 
         if(rc!=0)

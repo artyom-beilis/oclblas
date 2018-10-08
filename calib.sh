@@ -1,6 +1,7 @@
 rm -f log_full.txt
-EXTRA="-c -i 100 -w 100"
-for M in "-m 8192 -n 1024 -k 32"
+EXTRA="-i 100 -w 100"
+#for M in "-m 8192 -n 1024 -k 32"
+for M in "-m 512 -n 512 -k 512"
 do
     rm -f log.txt
     for TSK in 1 2 4 8 16 32 64 128

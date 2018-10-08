@@ -1,0 +1,7 @@
+gemm
+gemv
+axpy
+scal
+axpby
+dot
+asum

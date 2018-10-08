@@ -1,13 +1,110 @@
+#include <nvrtc.h>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 #include <vector>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
+#include <memory>
 
 #include "sgemm_base.h"
 
-void mysgemm_call(int M,float *A,float *B,float *C);
+#define NVRTC_SAFE_CALL(x)                                        \
+  do {                                                            \
+    nvrtcResult result = x;                                       \
+    if (result != NVRTC_SUCCESS) {                                \
+      std::cerr << "\nerror: " #x " failed with error "           \
+                << nvrtcGetErrorString(result) << '\n';           \
+      exit(1);                                                    \
+    }                                                             \
+  } while(0)
 
+#define CUDA_SAFE_CALL(x)                                         \
+  do {                                                            \
+    CUresult result = x;                                          \
+    if (result != CUDA_SUCCESS) {                                 \
+      const char *msg;                                            \
+      cuGetErrorName(result, &msg);                               \
+      std::cerr << "\nerror: " #x " failed with error "           \
+                << msg << '\n';                                   \
+      exit(1);                                                    \
+    }                                                             \
+  } while(0)
+
+class cuprog {
+public:
+    cuprog(char const *src,std::vector<std::string> const &defs)
+    {
+        nvrtcProgram prog;
+        NVRTC_SAFE_CALL(
+                nvrtcCreateProgram(&prog,         // prog
+                    src,         // buffer
+                    "gemm.cl",    // name
+                    0,             // numHeaders
+                    NULL,          // headers
+                    NULL));        // includeNames
+        // Compile the program for compute_30 with fmad disabled.
+        std::vector<std::string> opts = {"-DOCL_TO_CU","--gpu-architecture=compute_60"};
+        std::vector<char const *> copts;
+        for(std::string const &v : defs)
+            opts.push_back("-D"+v);
+        for(std::string const &v: opts) {
+            std::cerr << " " << v;
+            copts.push_back(v.c_str());
+        }
+        std::cerr << std::endl;
+        nvrtcResult compileResult = nvrtcCompileProgram(prog,  // prog
+                copts.size(),     // numOptions
+                &copts[0]); // options
+        // Obtain compilation log from the program.
+        size_t logSize;
+        NVRTC_SAFE_CALL(nvrtcGetProgramLogSize(prog, &logSize));
+        char *log = new char[logSize];
+        NVRTC_SAFE_CALL(nvrtcGetProgramLog(prog, log));
+        std::cout << log << '\n';
+        delete[] log;
+        if (compileResult != NVRTC_SUCCESS) {
+            exit(1);
+        }
+        // Obtain PTX from the program.
+        size_t ptxSize;
+        NVRTC_SAFE_CALL(nvrtcGetPTXSize(prog, &ptxSize));
+        char *ptx = new char[ptxSize];
+        NVRTC_SAFE_CALL(nvrtcGetPTX(prog, ptx));
+        // Destroy the program.
+        NVRTC_SAFE_CALL(nvrtcDestroyProgram(&prog));
+        // Load the generated PTX and get a handle to the SAXPY kernel.
+        CUDA_SAFE_CALL(cuInit(0));
+        CUDA_SAFE_CALL(cuDeviceGet(&cuDevice, 0));
+        CUDA_SAFE_CALL(cuCtxCreate(&context, 0, cuDevice));
+        CUDA_SAFE_CALL(cuModuleLoadDataEx(&module, ptx, 0, 0, 0));
+        CUDA_SAFE_CALL(cuModuleGetFunction(&kernel, module, "sgemm"));
+  }
+  void call(int wg[2],int lgw[2],int M,int N,int K,float *A,int lda,float *B,int ldb,float *C,int ldc)
+  {
+      void *args[] = { &M, &N, &K, &A,&lda,&B,&ldb, &C, &ldc };
+      CUDA_SAFE_CALL(
+              cuLaunchKernel(kernel,
+                  wg[0]/lgw[0], wg[1]/lgw[1], 1,    // grid dim
+                  lgw[0]      , lgw[1]      , 1,   // block dim
+                  0, NULL,             // shared mem and stream
+                  args, 0));           // arguments
+
+  }
+  ~cuprog()
+  {
+      CUDA_SAFE_CALL(cuModuleUnload(module));
+      CUDA_SAFE_CALL(cuCtxDestroy(context));
+  }
+
+private:
+  CUdevice cuDevice;
+  CUcontext context;
+  CUmodule module;
+  CUfunction kernel;
+
+};
 
 class sgemm_mycuda : public sgemm_base {
 public:
@@ -19,20 +116,70 @@ public:
         cudaFree(b_);
         cudaFree(c_);
     }
-    virtual void config(int M,bool Atr,bool Btr)
+    static int round_up_div(int x,int y)
+    {
+        return (x + y - 1)/y;
+    }
+    void subst(int &v,char const *s)
+    {
+        if(!getenv(s))
+            return;
+        v=atoi(getenv(s));
+    }
+    virtual void config(int M,int N,int K,bool Atr,bool Btr)
     {
         M_= M;
+        N_= N;
+        K_= K;
         Atr_ = Atr;
         Btr_ = Btr;
-        cudaMalloc((void **)&a_,M*M*sizeof(float));
-        cudaMalloc((void **)&b_,M*M*sizeof(float));
-        cudaMalloc((void **)&c_,M*M*sizeof(float));
+        cudaMalloc((void **)&a_,M*K*sizeof(float));
+        cudaMalloc((void **)&b_,K*N*sizeof(float));
+        cudaMalloc((void **)&c_,M*N*sizeof(float));
+
+        std::vector<std::string> opts;
+
+        tile_size_ = 32;
+        block_size_y_ = 4;
+        block_size_x_ = 4;
+        tile_size_k_ = 8;
+
+        subst(tile_size_,"TILE_SIZE");
+        subst(block_size_y_,"BLOCK_Y");
+        subst(block_size_x_,"BLOCK_X");
+        subst(tile_size_k_,"TILE_SIZE_K");
+        int wg_size = (tile_size_  * tile_size_ / block_size_x_ / block_size_y_);
+        if(tile_size_ * tile_size_k_ % wg_size != 0) {
+            std::cerr <<"FIXING TILE SIZE!!" << std::endl;
+            throw std::runtime_error("Inv");
+        }
+
+        opts.push_back("OCL_TO_CU");
+        opts.push_back("TILE_SIZE=" + std::to_string(tile_size_));
+        opts.push_back("TILE_SIZE_K=" + std::to_string(tile_size_k_));
+        opts.push_back("BLOCK_SIZE_X=" + std::to_string(block_size_x_));
+        opts.push_back("BLOCK_SIZE_Y=" + std::to_string(block_size_y_));
+        if(Btr_)
+            opts.push_back("BTRANS");
+        if(Atr_)
+            opts.push_back("ATRANS");
+
+        std::ifstream tmp;
+        tmp.open("gemm.cl");
+
+        if(!tmp) {
+            throw std::runtime_error("Failed to open gemm.cl");
+        }
+        std::ostringstream ss;
+        ss << tmp.rdbuf();
+        std::string src=ss.str();
+        prog.reset(new cuprog(src.c_str(),opts));
     }
     virtual void set_A(float const *A) { 
-        cudaMemcpy(a_,A,M_*M_*sizeof(float),cudaMemcpyHostToDevice);
+        cudaMemcpy(a_,A,M_*K_*sizeof(float),cudaMemcpyHostToDevice);
     }
     virtual void set_B(float const *B) { 
-        cudaMemcpy(b_,B,M_*M_*sizeof(float),cudaMemcpyHostToDevice);
+        cudaMemcpy(b_,B,K_*N_*sizeof(float),cudaMemcpyHostToDevice);
     }
     virtual void set_C(float *C) { 
         c_host_ = C;
@@ -40,22 +187,32 @@ public:
 
     virtual void calc()
     {
-        mysgemm_call(M_,a_,b_,c_);
+        int ls[2],gs[2];
+        ls[0] = tile_size_ / block_size_y_;
+        ls[1] = tile_size_ / block_size_x_; 
+        gs[0] = round_up_div(M_,tile_size_) * tile_size_ / block_size_y_;
+        gs[1] = round_up_div(N_,tile_size_) * tile_size_ / block_size_x_;
+        prog->call(gs,ls,M_,N_,K_,a_,(!Atr_ ? K_ : M_ ),b_,(!Btr_ ? N_ : K_ ),c_,N_);
     }
     virtual void sync() {
         cudaDeviceSynchronize();
     }
     virtual void copy_back() {
-        cudaMemcpy(c_host_,c_,M_*M_*sizeof(float),cudaMemcpyDeviceToHost);
+        cudaMemcpy(c_host_,c_,M_*N_*sizeof(float),cudaMemcpyDeviceToHost);
     }
 private:
-    int M_;
+    int M_,N_,K_;
     bool Atr_;
     bool Btr_;
     float *a_;
     float *b_;
     float *c_;
     float *c_host_;
+    int block_size_x_;
+    int block_size_y_;
+    int tile_size_;
+    int tile_size_k_;
+    std::unique_ptr<cuprog> prog;
 };
 
 sgemm_base *get_mycuda() { return new sgemm_mycuda(); };
