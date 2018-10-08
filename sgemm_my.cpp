@@ -76,7 +76,7 @@ public:
     subst(tile_size_k_,"TILE_SIZE_K");
     int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
     if(tile_size_m_ % block_size_m_ != 0 || tile_size_n_ % block_size_n_ != 0) {
-        std::cerr <<"FIXING TILE SIZE / BS!!" << std::endl;
+        std::cerr <<"FIXING TILE SIZE / BS!!" << (tile_size_m_ % block_size_m_) << " " << (tile_size_n_ % block_size_n_) << std::endl;
         throw std::runtime_error("Inv");
     }
     if(tile_size_m_ * tile_size_k_ % wg_size != 0 || tile_size_n_ * tile_size_k_ % wg_size != 0) {

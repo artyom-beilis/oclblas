@@ -1,7 +1,10 @@
+// vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #include <iostream>
 #include <vector>
 #include <stdio.h>
+#include <unistd.h>
 #include <assert.h>
+#include <stdlib.h>
 
 namespace {
     int BLOCK_SIZE_M;
@@ -131,17 +134,38 @@ void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2)
     the_bank.calc_conflicts(conf,broad);
     if(!conf) {
         double flops_fill_rate = 100.0 * (BLOCK_SIZE_N * BLOCK_SIZE_M) / (BLOCK_SIZE_M + BLOCK_SIZE_N + BLOCK_SIZE_N * BLOCK_SIZE_M);
-        printf("%5.3f%% Fill tm=%-3d tn=%-3d bm=%-2d bn=%-2d k=%-2d  Conf=%-8d BC=%-8d\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_N,BLOCK_SIZE_M,TILE_SIZE_K,conf,broad);
+        printf("%5.3f%% Fill TILE_SIZE_M=%-3d TILE_SIZE_N=%-3d BLOCK_M=%-2d BLOCK_N=%-2d TILE_SIZE_K=%-2d\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_M,BLOCK_SIZE_N,TILE_SIZE_K);
     }
     
 }
 
 
-int main()
+int main(int argc,char **argv)
 {
     bank_size = 32;
     local_memory_limit = 49152;
-    do_test();
+
+    bool force_equal = false;
+    int opt;
+    while((opt=getopt(argc,argv,"eb:l:"))!= -1) {
+        switch(opt) {
+        case 'e':
+            force_equal = true; 
+            break;
+        case 'b':
+            bank_size = atoi(optarg);
+            break;
+        case 'l':
+            local_memory_limit = atoi(optarg);
+            break;
+        default:
+            std::cerr << "Usage [-e ] [ -b banks no ] [ -l loc_mem_size ]" << std::endl;
+            return 1;
+        }
+    }
+
+    if(argc==2 && std::string(argv[1]) == "-e")
+	    force_equal = true;
 
     for(int wg_size = 32;wg_size<=512;wg_size+=32) {
         for(int wg_size_n=1;wg_size_n <= wg_size;wg_size_n++) {
@@ -152,6 +176,8 @@ int main()
                 for(int bs_m = 1;bs_m <= wg_size;bs_m++) {
                     int tile_size_n = wg_size_n * bs_n;
                     int tile_size_m = wg_size_m * bs_m;
+		    if(force_equal && tile_size_m != tile_size_n)
+			    continue;
                     if(tile_size_n > 128 || tile_size_m > 128)
                         continue;
                     for(int tile_size_k = 1;tile_size_k <= 32;tile_size_k ++) {
