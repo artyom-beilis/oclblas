@@ -45,7 +45,7 @@ public:
                     NULL,          // headers
                     NULL));        // includeNames
         // Compile the program for compute_30 with fmad disabled.
-        std::vector<std::string> opts = {"-DOCL_TO_CU","--gpu-architecture=compute_60"};
+        std::vector<std::string> opts = {"-DOCL_TO_CU","--gpu-architecture=compute_52"};
         std::vector<char const *> copts;
         for(std::string const &v : defs)
             opts.push_back("-D"+v);

@@ -1,21 +1,24 @@
 // vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
-#ifndef TILE_SIZE
-#define TILE_SIZE 32
+#ifndef TILE_SIZE_M
+#define TILE_SIZE_M TILE_SIZE
 #endif
-#ifndef BLOCK_SIZE_X
-#define BLOCK_SIZE_X 4
+#ifndef TILE_SIZE_N
+#define TILE_SIZE_N TILE_SIZE
 #endif
-#ifndef BLOCK_SIZE_Y
-#define BLOCK_SIZE_Y 4
+#ifndef BLOCK_SIZE_N
+#define BLOCK_SIZE_N 4
+#endif
+#ifndef BLOCK_SIZE_M
+#define BLOCK_SIZE_M 4
 #endif
 
 #ifndef TILE_SIZE_K
 #define TILE_SIZE_K 8
 #endif 
 
-#define BLOCK_SIZE_XY (BLOCK_SIZE_X*BLOCK_SIZE_Y)
-#define BLOCKS_IN_TILE_X (TILE_SIZE / BLOCK_SIZE_X)
-#define BLOCKS_IN_TILE_Y (TILE_SIZE / BLOCK_SIZE_Y)
+#define BLOCK_SIZE_NY (BLOCK_SIZE_N*BLOCK_SIZE_M)
+#define BLOCKS_IN_TILE_X (TILE_SIZE_N / BLOCK_SIZE_N)
+#define BLOCKS_IN_TILE_Y (TILE_SIZE_M / BLOCK_SIZE_M)
 
 #define ALIGN_FLOAT4 __attribute__ ((aligned (16)))
 
@@ -57,72 +60,141 @@ void    sgemm(    int M,int N,int K,
         __global const float * restrict B,int ldb,
         __global float * restrict C,int ldc)
 {
-    ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][TILE_SIZE];
-    ALIGN_FLOAT4 __local float b_tile[TILE_SIZE_K][TILE_SIZE];
+    ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][TILE_SIZE_M];
+    ALIGN_FLOAT4 __local float b_tile[TILE_SIZE_K][TILE_SIZE_N];
 
-    float c[BLOCK_SIZE_Y][BLOCK_SIZE_X] = {{0.0f}};
-    float bp[BLOCK_SIZE_X];
+    float c[BLOCK_SIZE_M][BLOCK_SIZE_N] = {{0.0f}};
+    float bp[BLOCK_SIZE_N];
     float av;
     
-    int row = get_global_id(0) * BLOCK_SIZE_Y;
-    int col = get_global_id(1) * BLOCK_SIZE_X;
+    int row = get_global_id(0) * BLOCK_SIZE_M;
+    int col = get_global_id(1) * BLOCK_SIZE_N;
 
     int lid0 = get_local_id(0);
     int lid1 = get_local_id(1);
     
-    int block_row = get_local_id(0)*BLOCK_SIZE_Y;
-    int block_col = get_local_id(1)*BLOCK_SIZE_X;
+    int block_row = get_local_id(0)*BLOCK_SIZE_M;
+    int block_col = get_local_id(1)*BLOCK_SIZE_N;
 
-    int tile_row0 = get_group_id(0)*TILE_SIZE;
-    int tile_col0 = get_group_id(1)*TILE_SIZE;
+    int tile_row0 = get_group_id(0)*TILE_SIZE_M;
+    int tile_col0 = get_group_id(1)*TILE_SIZE_N;
 
-    bool good_row = (tile_row0 + TILE_SIZE <= M) && (tile_col0 + TILE_SIZE <= N);
+    bool good_row = (tile_row0 + TILE_SIZE_M <= M);
+    bool good_col = (tile_col0 + TILE_SIZE_N <= N);
 
     const int local_wg_size = BLOCKS_IN_TILE_Y * BLOCKS_IN_TILE_X;
-    const int load_step = TILE_SIZE * TILE_SIZE_K / local_wg_size;
+    const int load_step_a = TILE_SIZE_M * TILE_SIZE_K / local_wg_size;
+    const int load_step_b = TILE_SIZE_N * TILE_SIZE_K / local_wg_size;
     
     int local_tile_id = lid0 * get_local_size(1) + lid1;
 
     int k=0;
     for(k=0;k<K;k+=TILE_SIZE_K) {
-        int read_pos = local_tile_id;
-        if(good_row && k + TILE_SIZE_K <= K) {
-            #pragma unroll
-            for(int i=0;i<load_step;i++) {
-                int tile_kdir = read_pos / TILE_SIZE;
-                int tile_tdir = read_pos % TILE_SIZE;
 
-                int k_rc  = tile_kdir + k;
-                int a_row = tile_tdir + tile_row0;
-                int b_col = tile_tdir + tile_col0;
-
-                a_tile[tile_kdir][tile_tdir] = get_A(a_row,k_rc );
-                b_tile[tile_kdir][tile_tdir] = get_B(k_rc ,b_col);
-
-                read_pos += local_wg_size;
-            }
-        }
-        else {
-            #pragma unroll
-            for(int i=0;i<load_step;i++) {
-                int tile_kdir = read_pos / TILE_SIZE;
-                int tile_tdir = read_pos % TILE_SIZE;
-
-                int k_rc  = tile_kdir + k;
-                if(k_rc < K) {
+        #if TILE_SIZE_M == TILE_SIZE_N
+            int read_pos = local_tile_id;
+            if(good_row && good_col && k + TILE_SIZE_K <= K) {
+                #pragma unroll
+                for(int i=0;i<load_step_a;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_M;
+                    int tile_tdir = read_pos % TILE_SIZE_M;
+                    int k_rc  = tile_kdir + k;
                     int a_row = tile_tdir + tile_row0;
                     int b_col = tile_tdir + tile_col0;
-                    a_tile[tile_kdir][tile_tdir] = (a_row < M) ? get_A(a_row,k_rc ) : 0.0f;
-                    b_tile[tile_kdir][tile_tdir] = (b_col < N) ? get_B(k_rc ,b_col) : 0.0f;
-                } 
-                else {
-                    a_tile[tile_kdir][tile_tdir] = 0.0f;
-                    b_tile[tile_kdir][tile_tdir] = 0.0f;
+                    a_tile[tile_kdir][tile_tdir] = get_A(a_row,k_rc );
+                    b_tile[tile_kdir][tile_tdir] = get_B(k_rc ,b_col);
+                    read_pos += local_wg_size;
                 }
-
-                read_pos += local_wg_size;
             }
-        }
+            else {
+                #pragma unroll
+                for(int i=0;i<load_step_a;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_M;
+                    int tile_tdir = read_pos % TILE_SIZE_M;
+
+                    int k_rc  = tile_kdir + k;
+                    if(k_rc < K) {
+                        int a_row = tile_tdir + tile_row0;
+                        int b_col = tile_tdir + tile_col0;
+                        a_tile[tile_kdir][tile_tdir] = (a_row < M) ? get_A(a_row,k_rc ) : 0.0f;
+                        b_tile[tile_kdir][tile_tdir] = (b_col < N) ? get_B(k_rc ,b_col) : 0.0f;
+                    } 
+                    else {
+                        a_tile[tile_kdir][tile_tdir] = 0.0f;
+                        b_tile[tile_kdir][tile_tdir] = 0.0f;
+                    }
+
+                    read_pos += local_wg_size;
+                }
+            }
+
+        #else // TILE_SIZE_M != TILE_SIZE_N
+            int read_pos = local_tile_id;
+            if(good_row && k + TILE_SIZE_K <= K) {
+                #pragma unroll
+                for(int i=0;i<load_step_a;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_M;
+                    int tile_tdir = read_pos % TILE_SIZE_M;
+                    int k_rc  = tile_kdir + k;
+                    int a_row = tile_tdir + tile_row0;
+                    a_tile[tile_kdir][tile_tdir] = get_A(a_row,k_rc );
+                    read_pos += local_wg_size;
+                }
+            }
+            else {
+                #pragma unroll
+                for(int i=0;i<load_step_a;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_M;
+                    int tile_tdir = read_pos % TILE_SIZE_M;
+
+                    int k_rc  = tile_kdir + k;
+                    if(k_rc < K) {
+                        int a_row = tile_tdir + tile_row0;
+                        a_tile[tile_kdir][tile_tdir] = (a_row < M) ? get_A(a_row,k_rc ) : 0.0f;
+                    } 
+                    else {
+                        a_tile[tile_kdir][tile_tdir] = 0.0f;
+                    }
+
+                    read_pos += local_wg_size;
+                }
+            }
+
+            read_pos = local_tile_id;
+
+
+            if(good_col && k + TILE_SIZE_K <= K) {
+                #pragma unroll
+                for(int i=0;i<load_step_b;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_N;
+                    int tile_tdir = read_pos % TILE_SIZE_N;
+
+                    int k_rc  = tile_kdir + k;
+                    int b_col = tile_tdir + tile_col0;
+
+                    b_tile[tile_kdir][tile_tdir] = get_B(k_rc ,b_col);
+                    read_pos += local_wg_size;
+                }
+            }
+            else {
+                #pragma unroll
+                for(int i=0;i<load_step_b;i++) {
+                    int tile_kdir = read_pos / TILE_SIZE_N;
+                    int tile_tdir = read_pos % TILE_SIZE_N;
+
+                    int k_rc  = tile_kdir + k;
+                    if(k_rc < K) {
+                        int b_col = tile_tdir + tile_col0;
+                        b_tile[tile_kdir][tile_tdir] = (b_col < N) ? get_B(k_rc ,b_col) : 0.0f;
+                    } 
+                    else {
+                        b_tile[tile_kdir][tile_tdir] = 0.0f;
+                    }
+
+                    read_pos += local_wg_size;
+                }
+            }
+        #endif
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -130,14 +202,14 @@ void    sgemm(    int M,int N,int K,
         for(int dk=0;dk<lmt;dk++) {
             
             #pragma unroll
-            for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                 bp[dc] = b_tile[dk][block_col+dc];
             }
             #pragma unroll
-            for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+            for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
                 av =  a_tile[dk][block_row+dr];
                 #pragma unroll
-                for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+                for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                     c[dr][dc] = mad(av,bp[dc],c[dr][dc]);
                 }
             }
@@ -146,20 +218,20 @@ void    sgemm(    int M,int N,int K,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if(row + BLOCK_SIZE_Y <= M && col + BLOCK_SIZE_X <= N) {
+    if(row + BLOCK_SIZE_M <= M && col + BLOCK_SIZE_N <= N) {
         #pragma unroll
-        for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
             #pragma unroll
-            for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                 C[(row+dr)*ldc+col+dc] = c[dr][dc];
             }
         }
     }
     else {
         #pragma unroll
-        for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
             #pragma unroll
-            for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+            for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                 if(row + dr < M && col+dc < N)
                     C[(row+dr)*ldc+col+dc] = c[dr][dc];
             }

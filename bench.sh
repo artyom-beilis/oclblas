@@ -4,8 +4,14 @@ randv()
 {
     python -c 'import math; import random ; print int(math.ceil(math.pow(2,random.random()*12)))'
 }
+
+pow2()
+{
+	python -c "import math; import random ; print int(math.pow(2,$1))"
+}
+
 #for M in 0 1 2 4 8 16 32 64 128 256 512 1024 2048
-for step in {0..50}
+for step in {0..12}
 do
     if [ "$step" == "0" ]
     then
@@ -16,11 +22,11 @@ do
         M=$(randv)
         N=$(randv)
         K=$(randv)
-        let prod=( $M '*' $N '*' $K )
-        if [ $prod -lt 40960 ]
-        then
-            continue
-        fi
+
+	M=$(pow2 $step)
+	N=$(pow2 $step)
+	K=$(pow2 $step)
+
     fi
     if [ "$K" == 0 ]
     then
@@ -28,10 +34,11 @@ do
     else
         printf '%20s,' "$M:$N:$K"
     fi
-    for backend in cublas clblast clblas viennacl my mycuda
+    for backend in cublas clblast clblas viennacl my
     do
 
-        export TILE_SIZE=32
+        export TILE_SIZE_N=32
+        export TILE_SIZE_M=64
         export TILE_SIZE_K=8
         export BLOCK_X=4
         export BLOCK_Y=4

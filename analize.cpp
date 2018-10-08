@@ -4,10 +4,11 @@
 #include <assert.h>
 
 namespace {
-    int BLOCK_SIZE_Y;
-    int BLOCK_SIZE_X;
+    int BLOCK_SIZE_M;
+    int BLOCK_SIZE_N;
     int TILE_SIZE_K;
-    int TILE_SIZE;
+    int TILE_SIZE_M;
+    int TILE_SIZE_N;
 
     int local_id[2];
     #define get_local_id(n) (local_id[n])
@@ -90,35 +91,36 @@ array b_tile,a_tile;
 
 void kernel()
 {
-    int block_row = get_local_id(0)*BLOCK_SIZE_Y;
-    int block_col = get_local_id(1)*BLOCK_SIZE_X;
+    int block_row = get_local_id(0)*BLOCK_SIZE_M;
+    int block_col = get_local_id(1)*BLOCK_SIZE_N;
         
     for(int dk=0;dk<TILE_SIZE_K;dk++) {
-        for(int dc=0;dc<BLOCK_SIZE_X;dc++) {
+        for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
             b_tile.access(dk,block_col+dc);
         }
-        for(int dr=0;dr<BLOCK_SIZE_Y;dr++) {
+        for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
             a_tile.access(dk,block_row+dr);
         }
     }
 }
 
-void do_test(int ts=32,int tk=16,int bx=2,int by=2)
+void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2)
 {
-    TILE_SIZE = ts;
+    TILE_SIZE_M = ts_m;
+    TILE_SIZE_N = ts_n;
     TILE_SIZE_K = tk;
-    BLOCK_SIZE_X = bx;
-    BLOCK_SIZE_Y = by;
+    BLOCK_SIZE_N = bx;
+    BLOCK_SIZE_M = by;
 
-    total_threads = TILE_SIZE * TILE_SIZE / BLOCK_SIZE_X / BLOCK_SIZE_Y;
+    total_threads = TILE_SIZE_M * TILE_SIZE_N / BLOCK_SIZE_N / BLOCK_SIZE_M;
 
-    a_tile.init(TILE_SIZE_K,TILE_SIZE,0);
-    b_tile.init(TILE_SIZE_K,TILE_SIZE,a_tile.end);
+    a_tile.init(TILE_SIZE_K,TILE_SIZE_M,0);
+    b_tile.init(TILE_SIZE_K,TILE_SIZE_N,a_tile.end);
     the_bank.init();
 
     current_thread=0;
-    for(int x=0;x<TILE_SIZE/BLOCK_SIZE_X;x++) {
-        for(int y=0;y<TILE_SIZE/BLOCK_SIZE_Y;y++) {
+    for(int x=0;x<TILE_SIZE_N/BLOCK_SIZE_N;x++) {
+        for(int y=0;y<TILE_SIZE_M/BLOCK_SIZE_M;y++) {
             local_id[0]=x;
             local_id[1]=y;
             kernel();
@@ -128,8 +130,8 @@ void do_test(int ts=32,int tk=16,int bx=2,int by=2)
     int conf,broad;
     the_bank.calc_conflicts(conf,broad);
     if(!conf) {
-        double flops_fill_rate = 100.0 * (BLOCK_SIZE_X * BLOCK_SIZE_Y) / (BLOCK_SIZE_Y + BLOCK_SIZE_X + BLOCK_SIZE_X * BLOCK_SIZE_Y);
-        printf("%5.3f%% Fill tile=%-3d by=%-2d bx=%-2d k=%-2d  Conf=%-8d BC=%-8d\n",flops_fill_rate,TILE_SIZE,BLOCK_SIZE_X,BLOCK_SIZE_Y,TILE_SIZE_K,conf,broad);
+        double flops_fill_rate = 100.0 * (BLOCK_SIZE_N * BLOCK_SIZE_M) / (BLOCK_SIZE_M + BLOCK_SIZE_N + BLOCK_SIZE_N * BLOCK_SIZE_M);
+        printf("%5.3f%% Fill tm=%-3d tn=%-3d bm=%-2d bn=%-2d k=%-2d  Conf=%-8d BC=%-8d\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_N,BLOCK_SIZE_M,TILE_SIZE_K,conf,broad);
     }
     
 }
@@ -142,23 +144,22 @@ int main()
     do_test();
 
     for(int wg_size = 32;wg_size<=512;wg_size+=32) {
-        for(int wg_size_x=1;wg_size_x <= wg_size;wg_size_x++) {
-            if(wg_size % wg_size_x != 0)
+        for(int wg_size_n=1;wg_size_n <= wg_size;wg_size_n++) {
+            if(wg_size % wg_size_n != 0)
                 continue;
-            int wg_size_y = wg_size / wg_size_x;
-            for(int bs_x = 1;bs_x <= wg_size;bs_x++) {
-                for(int bs_y = 1;bs_y <= wg_size;bs_y++) {
-                    if(wg_size_x * bs_x != wg_size_y * bs_y)
+            int wg_size_m = wg_size / wg_size_n;
+            for(int bs_n = 1;bs_n <= wg_size;bs_n++) {
+                for(int bs_m = 1;bs_m <= wg_size;bs_m++) {
+                    int tile_size_n = wg_size_n * bs_n;
+                    int tile_size_m = wg_size_m * bs_m;
+                    if(tile_size_n > 128 || tile_size_m > 128)
                         continue;
-                    int tile_size = wg_size_x * bs_x;
-                    if(tile_size > 128)
-                        continue;
-                    for(int tile_size_k = 1;tile_size_k <= wg_size;tile_size_k ++) {
-                        if(tile_size * tile_size_k % wg_size != 0)
+                    for(int tile_size_k = 1;tile_size_k <= 32;tile_size_k ++) {
+                        if(tile_size_m * tile_size_k % wg_size != 0 || tile_size_n * tile_size_k % wg_size != 0)
                             continue;
-                        if(tile_size_k * 2 * tile_size * sizeof(float) >= local_memory_limit)
+                        if(tile_size_k * (tile_size_n + tile_size_m) * sizeof(float) + 16 >= local_memory_limit)
                             continue;
-                        do_test(tile_size,tile_size_k,bs_x,bs_y);
+                        do_test(tile_size_m,tile_size_n,tile_size_k,bs_n,bs_m);
                     }
                 }
             }
