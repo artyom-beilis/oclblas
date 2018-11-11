@@ -11,28 +11,31 @@
 
 sgemm_base *get_cpu();
 sgemm_base *get_cublas();
-sgemm_base *get_clblast();
-sgemm_base *get_clblas();
-sgemm_base *get_viennacl();
-sgemm_base *get_my();
+sgemm_base *get_clblast(int p,int d);
+sgemm_base *get_miopengemm(int p,int d);
+sgemm_base *get_clblas(int p,int d);
+sgemm_base *get_viennacl(int p,int d);
+sgemm_base *get_my(int p,int d);
 sgemm_base *get_mycuda();
 
-sgemm_base *get(std::string const &name)
+sgemm_base *get(std::string const &name,int plat,int dev)
 {
     if(name == "cpu")
         return get_cpu();
-    if(name == "cublas")
-        return get_cublas();
+//    if(name == "cublas")
+//        return get_cublas();
+    if(name == "miopengemm")
+        return get_miopengemm(plat,dev);
     if(name == "clblast")
-        return get_clblast();
+        return get_clblast(plat,dev);
     if(name == "clblas")
-        return get_clblas();
+        return get_clblas(plat,dev);
     if(name == "viennacl")
-        return get_viennacl();
+        return get_viennacl(plat,dev);
     if(name == "my")
-        return get_my();
-    if(name == "mycuda")
-        return get_mycuda();
+        return get_my(plat,dev);
+//    if(name == "mycuda")
+//        return get_mycuda();
     return nullptr;
 }
 
@@ -100,14 +103,18 @@ int main(int argc,char **argv)
     int N = 2;
     int iters = 100;
     int skip  = 100;
+    int plat=0;
+    int dev=0;
     bool atr=false,btr=false;
     int opt;
     bool sync=false;
     bool sim=false;
     std::string mode="cpu";
     bool do_check = false;
-    while((opt=getopt(argc,argv,"m:n:k:i:a:b:v:csw:S"))!=-1) {
+    while((opt=getopt(argc,argv,"m:n:k:i:a:b:v:csw:SP:D:"))!=-1) {
         switch(opt) {
+	case 'P' : plat=atoi(optarg); break;
+	case 'D' : dev=atoi(optarg); break;
         case 'm' : M = atoi(optarg); break;
         case 'n' : N = atoi(optarg); break;
         case 'k' : K = atoi(optarg); break;
@@ -124,7 +131,7 @@ int main(int argc,char **argv)
     }
 
     double flops = double(M)*N*(K + K - 1) * iters;
-    std::unique_ptr<sgemm_base> gemm(get(mode));
+    std::unique_ptr<sgemm_base> gemm(get(mode,plat,dev));
     if(!gemm.get()) {
         std::cerr << "Invalid mode "  << mode << std::endl;
         return 1;

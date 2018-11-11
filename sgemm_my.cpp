@@ -24,14 +24,14 @@ public:
     int tile_size_m_;
     int tile_size_n_;
     int tile_size_k_;
-    sgemm_my()  
+    sgemm_my(int p,int d)  
     {
         std::vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
         std::vector<cl::Device> devices;
-        platform_ = platforms[0];
+        platform_ = platforms[p];
         platform_.getDevices(CL_DEVICE_TYPE_ALL, &devices);
-        device_ = devices[0];
+        device_ = devices[d];
         auto device_as_vector = std::vector<cl::Device>{device_};
         context_ = cl::Context(device_as_vector);
         queue_ = cl::CommandQueue(context_, device_);
@@ -92,6 +92,8 @@ public:
 	block_size_n_ = std::min(tile_size_n_,block_size_n_);
 	block_size_m_ = std::min(tile_size_m_,block_size_m_);
 
+
+        opts << " -save-temps=./ ";
         opts << " -DTILE_SIZE_M=" << tile_size_m_ << " -DTILE_SIZE_N=" << tile_size_n_ << " -DBLOCK_SIZE_N=" << block_size_n_ << " -DBLOCK_SIZE_M=" << block_size_m_ << " -DTILE_SIZE_K="<<tile_size_k_;
 
         if(Btr_)
@@ -193,5 +195,5 @@ private:
     float *c_host_;
 };
 
-sgemm_base *get_my() { return new sgemm_my(); };
+sgemm_base *get_my(int p,int d) { return new sgemm_my(p,d); };
 

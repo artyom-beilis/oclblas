@@ -133,32 +133,49 @@ public:
         K_= K;
         Atr_ = Atr;
         Btr_ = Btr;
+        
         cudaMalloc((void **)&a_,M*K*sizeof(float));
         cudaMalloc((void **)&b_,K*N*sizeof(float));
         cudaMalloc((void **)&c_,M*N*sizeof(float));
+	
 
         std::vector<std::string> opts;
 
-        tile_size_ = 32;
-        block_size_y_ = 4;
-        block_size_x_ = 4;
-        tile_size_k_ = 8;
+	tile_size_m_ = 32;
+	tile_size_n_ = 32;
+	block_size_m_ = 4;
+	block_size_n_ = 4;
 
-        subst(tile_size_,"TILE_SIZE");
-        subst(block_size_y_,"BLOCK_Y");
-        subst(block_size_x_,"BLOCK_X");
-        subst(tile_size_k_,"TILE_SIZE_K");
-        int wg_size = (tile_size_  * tile_size_ / block_size_x_ / block_size_y_);
-        if(tile_size_ * tile_size_k_ % wg_size != 0) {
-            std::cerr <<"FIXING TILE SIZE!!" << std::endl;
-            throw std::runtime_error("Inv");
-        }
+	subst(tile_size_m_,"TILE_SIZE_M");
+	subst(tile_size_n_,"TILE_SIZE_N");
+	subst(block_size_m_,"BLOCK_M");
+	subst(block_size_n_,"BLOCK_N");
+    tile_size_k_ = 2;
+    subst(tile_size_k_,"TILE_SIZE_K");
+    int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
+    if(tile_size_m_ % block_size_m_ != 0 || tile_size_n_ % block_size_n_ != 0) {
+        std::cerr <<"FIXING TILE SIZE / BS!!" << (tile_size_m_ % block_size_m_) << " " << (tile_size_n_ % block_size_n_) << std::endl;
+        throw std::runtime_error("Inv");
+    }
+    if(tile_size_m_ * tile_size_k_ % wg_size != 0 || tile_size_n_ * tile_size_k_ % wg_size != 0) {
+        std::cerr <<"FIXING TILE SIZE!!" << std::endl;
+        //tile_size_k_ = tile_size_*tile_size_ / block_size_n_ / block_size_m_;
+        throw std::runtime_error("Inv");
+    }
+    /*if(tile_size_k_ % bin_y != 0 || tile_size_k_ % bin_x !=0) {
+        std::cerr <<"FIXING TILE SIZE!!" << std::endl;
+        tile_size_k_ = tile_size_;
+    }*/
 
-        opts.push_back("OCL_TO_CU");
-        opts.push_back("TILE_SIZE=" + std::to_string(tile_size_));
+	block_size_n_ = std::min(tile_size_n_,block_size_n_);
+	block_size_m_ = std::min(tile_size_m_,block_size_m_);
+
+       opts.push_back("OCL_TO_CU");
+        opts.push_back("TILE_SIZE_M=" + std::to_string(tile_size_m_));
+        opts.push_back("TILE_SIZE_N=" + std::to_string(tile_size_n_));
         opts.push_back("TILE_SIZE_K=" + std::to_string(tile_size_k_));
-        opts.push_back("BLOCK_SIZE_X=" + std::to_string(block_size_x_));
-        opts.push_back("BLOCK_SIZE_Y=" + std::to_string(block_size_y_));
+        opts.push_back("BLOCK_SIZE_M=" + std::to_string(block_size_m_));
+        opts.push_back("BLOCK_SIZE_N=" + std::to_string(block_size_n_));
         if(Btr_)
             opts.push_back("BTRANS");
         if(Atr_)
@@ -188,10 +205,10 @@ public:
     virtual void calc()
     {
         int ls[2],gs[2];
-        ls[0] = tile_size_ / block_size_y_;
-        ls[1] = tile_size_ / block_size_x_; 
-        gs[0] = round_up_div(M_,tile_size_) * tile_size_ / block_size_y_;
-        gs[1] = round_up_div(N_,tile_size_) * tile_size_ / block_size_x_;
+        ls[0] = tile_size_m_ / block_size_m_;
+        ls[1] = tile_size_n_ / block_size_n_; 
+        gs[0] = round_up_div(M_,tile_size_m_) * tile_size_m_ / block_size_m_;
+        gs[1] = round_up_div(N_,tile_size_n_) * tile_size_n_ / block_size_n_;
         prog->call(gs,ls,M_,N_,K_,a_,(!Atr_ ? K_ : M_ ),b_,(!Btr_ ? N_ : K_ ),c_,N_);
     }
     virtual void sync() {
@@ -208,9 +225,10 @@ private:
     float *b_;
     float *c_;
     float *c_host_;
-    int block_size_x_;
-    int block_size_y_;
-    int tile_size_;
+    int block_size_m_;
+    int block_size_n_;
+    int tile_size_m_;
+    int tile_size_n_;
     int tile_size_k_;
     std::unique_ptr<cuprog> prog;
 };

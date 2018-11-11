@@ -21,8 +21,10 @@ public:
         float &operator()(int i,int j) { return ptr_[i*N_+j]; }
         float const &operator()(int i,int j) const { return ptr_[i*N_+j]; }
     };
-    sgemm_viennacl()
+    sgemm_viennacl(int p,int d)
     {
+    	viennacl::ocl::set_context_platform_index(0,p);
+	viennacl::ocl::current_context().switch_device(d);
     }
     virtual ~sgemm_viennacl() { 
     }
@@ -80,5 +82,5 @@ private:
     float *c_host_;
 };
 
-sgemm_base *get_viennacl() { return new sgemm_viennacl(); };
+sgemm_base *get_viennacl(int p,int d) { return new sgemm_viennacl(p,d); };
 

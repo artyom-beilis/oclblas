@@ -9,14 +9,14 @@ public:
     cl::Device device_;
     cl::Context context_;
     cl::CommandQueue queue_;
-    sgemm_clblast()  
+    sgemm_clblast(int p,int d)  
     {
         std::vector<cl::Platform> platforms;
         cl::Platform::get(&platforms);
         std::vector<cl::Device> devices;
-        platform_ = platforms[0];
+        platform_ = platforms[p];
         platform_.getDevices(CL_DEVICE_TYPE_ALL, &devices);
-        device_ = devices[0];
+        device_ = devices[d];
         auto device_as_vector = std::vector<cl::Device>{device_};
         context_ = cl::Context(device_as_vector);
         queue_ = cl::CommandQueue(context_, device_);
@@ -74,5 +74,5 @@ private:
     float *c_host_;
 };
 
-sgemm_base *get_clblast() { return new sgemm_clblast(); };
+sgemm_base *get_clblast(int p,int d) { return new sgemm_clblast(p,d); };
 

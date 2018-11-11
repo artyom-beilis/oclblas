@@ -1,5 +1,6 @@
-#include <cublas.h>
-#include <cublas_v2.h>
+// vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
+#include "cublas.h"
+#include "cublas_v2.h"
 #include <cuda_runtime_api.h>
 #include <cuda.h>
 #include <vector>
@@ -8,32 +9,31 @@
 
 #include "sgemm_base.h"
 
-class sgemm_cublas : public sgemm_base {
+class conv_cudnn : public conv_base {
 public:
     sgemm_cublas() : a_(0),b_(0),c_(0) 
     {
-	int status;
-        if((status=cublasInit())!=0)
-		throw std::runtime_error(std::string("Failed to initialize cublas:") + std::to_string(status));
-        if((status=cublasCreate(&h_))!=0)
-		throw std::runtime_error(std::string("Failed to create cublas:") + std::to_string(status));
+        cudnnCreate(&cudnn_);
     }
     virtual ~sgemm_cublas() { 
-        cudaFree(a_);
-        cudaFree(b_);
-        cudaFree(c_);
-        cublasDestroy(h_);
+        cudaFree(ker_);
+        cudaFree(inp_);
+        cudaFree(out_);
+        cudnnDestroy(cudnn_);
     }
-    virtual void config(int M,int N,int K,bool Atr,bool Btr)
+    virtual void config(int kern,int pad,int out,int stride,int B,int C,int H,int W) 
     {
-        M_ = M;
-	N_ = N;
-	K_ = K;
-        Atr_ = Atr;
-        Btr_ = Btr;
-        cudaMalloc((void **)&a_,M*K*sizeof(float));
-        cudaMalloc((void **)&b_,K*N*sizeof(float));
-        cudaMalloc((void **)&c_,M*N*sizeof(float));
+        ks_ = kern;
+        pad_ = pad;
+        out_ = out;
+        stride_ = stride;
+        B_ = B;
+        C_ = C;
+        H_ = H;
+        W_ = W
+        cudaMalloc((void **)&ker_,kern*kern*C*out*sizeof(float));
+        cudaMalloc((void **)&inp_,B*C*W*H*sizeof(float));
+        cudaMalloc((void **)&out_,B*out*W*H*sizeof(float));
     }
     virtual void set_A(float const *A) { 
         cudaMemcpy(a_,A,M_*K_*sizeof(float),cudaMemcpyHostToDevice);
