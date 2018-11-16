@@ -21,11 +21,11 @@ all: test test_conv test_conv_hip
 test:$(OBJECTS) 
 	g++ -o test $(OBJECTS) $(LINKFLAGS) 
 
-test_conv: test_conv.cpp conv_miopen.cpp conv_base.h
-	g++ -I /opt/rocm/miopen-opencl/include -I /home/artik/Packages/viennacl/viennacl-dev -Wall -std=c++11 -g -O2 -o test_conv test_conv.cpp conv_miopen.cpp -L /opt/rocm/miopen-opencl/lib/ -lOpenCL -lMIOpen -Wl,-rpath=/opt/rocm/miopen-opencl/lib/ 
+test_conv: test_conv.cpp conv_miopen.cpp conv_base.h conv_ref.cpp
+	g++ -I /opt/rocm/miopen-opencl/include -I /home/artik/Packages/viennacl/viennacl-dev -Wall -std=c++11 -g -O2 -o test_conv test_conv.cpp conv_ref.cpp conv_miopen.cpp -L /opt/rocm/miopen-opencl/lib/ -lOpenCL -lMIOpen -Wl,-rpath=/opt/rocm/miopen-opencl/lib/ -lopenblas 
 
-test_conv_hip: test_conv.cpp conv_miopen.cpp conv_base.h
-	g++ -D __HIP_PLATFORM_HCC__   -I /opt/rocm/hip/include -I /opt/rocm/miopen/include -Wall -std=c++11 -g -O2 -o test_conv_hip test_conv.cpp conv_miopen.cpp -L /opt/rocm/miopen/lib/ -lMIOpen -Wl,-rpath=/opt/rocm/miopen/lib/:/opt/rocm/hip/lib -L /opt/rocm/hip/lib -lhip_hcc
+test_conv_hip: test_conv.cpp conv_miopen.cpp conv_base.h conv_ref.cpp
+	g++ -D __HIP_PLATFORM_HCC__   -I /opt/rocm/hip/include -I /opt/rocm/miopen/include -Wall -std=c++11 -g -O2 -o test_conv_hip test_conv.cpp conv_miopen.cpp conv_ref.cpp -L /opt/rocm/miopen/lib/ -lMIOpen -Wl,-rpath=/opt/rocm/miopen/lib/:/opt/rocm/hip/lib -L /opt/rocm/hip/lib -lhip_hcc -lopenblas
 
 
 $(OBJECTS): %.o: %.cpp sgemm_base.h 

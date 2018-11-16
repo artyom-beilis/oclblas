@@ -9,6 +9,7 @@
 #include <string.h>
 
 conv_base *get_conv_miopen(int p,int d);
+conv_base *get_conv_ref();
 
 conv_base *get(std::string const &name,int plat,int dev)
 {
@@ -37,8 +38,10 @@ int main(int argc,char **argv)
     bool sync=false;
     std::string mode="miopen";
     bool do_check = false;
-    while((opt=getopt(argc,argv,"K:v:p:P:d:B:C:D:N:S:scT:G:"))!=-1) {
+    while((opt=getopt(argc,argv,"K:v:p:P:d:B:C:D:N:S:scT:G:i:w:"))!=-1) {
         switch(opt) {
+	case 'w' : skip=atoi(optarg); break;
+	case 'i' : iters=atoi(optarg); break;
 	case 'G' : Groups=atoi(optarg); break;
 	case 'K' : Kernel=atoi(optarg); break;
 	case 'T' : sTride=atoi(optarg); break;
@@ -67,10 +70,19 @@ int main(int argc,char **argv)
     std::vector<float> vA(Batch*Dim*Dim*Chan);
     std::vector<float> vB(Kernel*Kernel*Chan*NumOutputs);
     std::vector<float> vC(out_dim*out_dim*NumOutputs*Batch);
+    std::vector<float> vC_ref(vC.size());
     
     memset(vA.data(),0,4*vA.size());
     memset(vB.data(),0,4*vB.size());
     memset(vC.data(),0,4*vC.size());
+    memset(vC_ref.data(),0,4*vC_ref.size());
+
+    for(int i=0;i<int(vA.size());i++) {
+	    vA[i] = int(double(rand()) / RAND_MAX * 3);
+    }
+    for(int i=0;i<int(vB.size());i++) {
+	    vB[i] = int(double(rand()) / RAND_MAX * 3);
+    }
 
     conv_param par;
     par.kernel_w = par.kernel_h = Kernel;
@@ -82,12 +94,25 @@ int main(int argc,char **argv)
     conv->set_input(vA.data());
     conv->set_kernel(vB.data());
     conv->set_output(vC.data());
+    
+    std::unique_ptr<conv_base> ref;
+    if(do_check) {
+	    ref.reset(get_conv_ref());
+	    ref->config(par,Batch,Chan,Dim,Dim);
+	    ref->set_input(vA.data());
+	    ref->set_kernel(vB.data());
+	    ref->set_output(vC_ref.data());
+	    ref->calc();
+	    ref->sync();
+	    ref->copy_back();
+    }
 
     auto shape = conv->get_out_shape();
     fprintf(stderr,"Input %d:%d:%d:%d, Output %d:%d:%d:%d Kernel=%d, Stride=%d, Pad=%d\n",
     			Batch,Chan,Dim,Dim, shape[0],shape[1],shape[2],shape[3],Kernel,sTride,Pad);
 
     assert(int(vC.size()) == shape[0]*shape[1]*shape[2]*shape[3]);
+
 
     std::cerr << "Starting " << std::endl;
 
@@ -97,6 +122,12 @@ int main(int argc,char **argv)
             conv->sync();
             if(do_check) {
                 conv->copy_back();
+		if(vC != vC_ref) {
+			for(size_t i=0;i<vC.size();i++) {
+				std::cerr << vC[i] << " " << vC_ref[i] << std::endl;
+			}
+			std::cerr << "FAILED" << std::endl;
+		}
             }
             start = std::chrono::system_clock::now(); 
         }
