@@ -11,6 +11,7 @@
 
 sgemm_base *get_cpu();
 sgemm_base *get_cublas();
+sgemm_base *get_cutlass();
 sgemm_base *get_clblast(int p,int d);
 sgemm_base *get_miopengemm(int p,int d);
 sgemm_base *get_clblas(int p,int d);
@@ -20,10 +21,13 @@ sgemm_base *get_mycuda();
 
 sgemm_base *get(std::string const &name,int plat,int dev)
 {
+#ifndef CUDA_ONLY
     if(name == "cpu")
         return get_cpu();
-//    if(name == "cublas")
-//        return get_cublas();
+    if(name == "cutlass")
+        return get_cutlass();
+    if(name == "cublas")
+        return get_cublas();
     if(name == "miopengemm")
         return get_miopengemm(plat,dev);
     if(name == "clblast")
@@ -34,8 +38,10 @@ sgemm_base *get(std::string const &name,int plat,int dev)
         return get_viennacl(plat,dev);
     if(name == "my")
         return get_my(plat,dev);
-//    if(name == "mycuda")
-//        return get_mycuda();
+#else
+    if(name == "mycuda")
+        return get_mycuda();
+#endif
     return nullptr;
 }
 

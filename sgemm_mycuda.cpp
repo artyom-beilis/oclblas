@@ -72,6 +72,8 @@ public:
         NVRTC_SAFE_CALL(nvrtcGetPTXSize(prog, &ptxSize));
         char *ptx = new char[ptxSize];
         NVRTC_SAFE_CALL(nvrtcGetPTX(prog, ptx));
+	std::ofstream ff("out_cu.ptx");
+	ff.write(ptx,ptxSize);
         // Destroy the program.
         NVRTC_SAFE_CALL(nvrtcDestroyProgram(&prog));
         // Load the generated PTX and get a handle to the SAXPY kernel.
@@ -80,6 +82,9 @@ public:
         CUDA_SAFE_CALL(cuCtxCreate(&context, 0, cuDevice));
         CUDA_SAFE_CALL(cuModuleLoadDataEx(&module, ptx, 0, 0, 0));
         CUDA_SAFE_CALL(cuModuleGetFunction(&kernel, module, "sgemm"));
+	int regs=-1;
+	CUDA_SAFE_CALL(cuFuncGetAttribute(&regs,CU_FUNC_ATTRIBUTE_NUM_REGS,kernel));
+	printf("%s numRegs=%d\n","sgemm",regs);
   }
   void call(int wg[2],int lgw[2],int M,int N,int K,float *A,int lda,float *B,int ldb,float *C,int ldc)
   {
@@ -150,6 +155,8 @@ public:
 	subst(tile_size_n_,"TILE_SIZE_N");
 	subst(block_size_m_,"BLOCK_M");
 	subst(block_size_n_,"BLOCK_N");
+	int off=0;
+	subst(off,"TILE_OFFSET");
     tile_size_k_ = 2;
     subst(tile_size_k_,"TILE_SIZE_K");
     int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
@@ -171,6 +178,7 @@ public:
 	block_size_m_ = std::min(tile_size_m_,block_size_m_);
 
        opts.push_back("OCL_TO_CU");
+        opts.push_back("TILE_OFFSET=" + std::to_string(off));
         opts.push_back("TILE_SIZE_M=" + std::to_string(tile_size_m_));
         opts.push_back("TILE_SIZE_N=" + std::to_string(tile_size_n_));
         opts.push_back("TILE_SIZE_K=" + std::to_string(tile_size_k_));

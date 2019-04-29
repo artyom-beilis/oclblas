@@ -28,7 +28,7 @@ public:
 		out_w_ = (w_ + par_.pad_w * 2 - par_.kernel_w) / par_.stride_w + 1;
 		out_h_ = (h_ + par_.pad_h * 2 - par_.kernel_h) / par_.stride_h + 1;
 		out_c_ = par_.num_outputs;
-		
+
 	}
 	std::array<int,4> get_out_shape() const
 	{

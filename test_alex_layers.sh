@@ -7,7 +7,7 @@ do
 	for PROG in ./test_conv ./test_conv_hip
 	do
 		echo $PROG
-		$PROG -p 1 -B $B $PARAMS 2>/dev/null
+		$PROG -c -p 1 -B $B $PARAMS 2>/dev/null
 	done
 done
 

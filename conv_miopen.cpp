@@ -166,6 +166,7 @@ public:
 		int cnt=0;
 		check(miopenFindConvolutionForwardAlgorithm(handle_,inp_,buf_in_(),ker_,buf_kern_(),desc_,out_,buf_out_(),
 							1,&cnt,&perf_,buf_ws_(),ws_size_,false));
+		std::cerr << "Algo=" << int(perf_.fwd_algo) << std::endl;
 
 
 	}

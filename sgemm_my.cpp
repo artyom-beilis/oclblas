@@ -67,11 +67,13 @@ public:
 	tile_size_n_ = 32;
 	block_size_m_ = 4;
 	block_size_n_ = 4;
+    int off = 0;
 
 	subst(tile_size_m_,"TILE_SIZE_M");
 	subst(tile_size_n_,"TILE_SIZE_N");
 	subst(block_size_m_,"BLOCK_M");
 	subst(block_size_n_,"BLOCK_N");
+    subst(off,"TILE_OFFSET");
     tile_size_k_ = 2;
     subst(tile_size_k_,"TILE_SIZE_K");
     int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
@@ -93,8 +95,9 @@ public:
 	block_size_m_ = std::min(tile_size_m_,block_size_m_);
 
 
-        opts << " -save-temps=./ ";
-        opts << " -DTILE_SIZE_M=" << tile_size_m_ << " -DTILE_SIZE_N=" << tile_size_n_ << " -DBLOCK_SIZE_N=" << block_size_n_ << " -DBLOCK_SIZE_M=" << block_size_m_ << " -DTILE_SIZE_K="<<tile_size_k_;
+        if(getenv("SAVE_TEMPS"))
+          opts << " -save-temps=./ ";
+        opts << " -DTILE_SIZE_M=" << tile_size_m_ << " -DTILE_SIZE_N=" << tile_size_n_ << " -DBLOCK_SIZE_N=" << block_size_n_ << " -DBLOCK_SIZE_M=" << block_size_m_ << " -DTILE_SIZE_K="<<tile_size_k_ << " -DTILE_OFFSET="<<off;
 
         if(Btr_)
             opts << " -DBTRANS";

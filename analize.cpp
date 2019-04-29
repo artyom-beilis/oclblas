@@ -117,7 +117,7 @@ void kernel()
     }
 }
 
-void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2,int off = 0)
+void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2,int off_a = 0,int off_b=0)
 {
     TILE_SIZE_M = ts_m;
     TILE_SIZE_N = ts_n;
@@ -129,8 +129,8 @@ void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2,int off = 0)
     int small_tiles_in_m = TILE_SIZE_M / BLOCK_SIZE_M;
     int small_tiles_in_n = TILE_SIZE_N / BLOCK_SIZE_N;
 
-    a_tile.init(TILE_SIZE_K,small_tiles_in_m,BLOCK_SIZE_M + off,0);
-    b_tile.init(TILE_SIZE_K,small_tiles_in_n,BLOCK_SIZE_N + off,a_tile.end);
+    a_tile.init(TILE_SIZE_K,small_tiles_in_m,BLOCK_SIZE_M + off_a,0);
+    b_tile.init(TILE_SIZE_K,small_tiles_in_n,BLOCK_SIZE_N + off_b,a_tile.end);
 
     the_bank.init();
 
@@ -146,8 +146,15 @@ void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2,int off = 0)
     int conf,broad;
     the_bank.calc_conflicts(conf,broad,false);
     double flops_fill_rate = 100.0 * (BLOCK_SIZE_N * BLOCK_SIZE_M) / (BLOCK_SIZE_M + BLOCK_SIZE_N + BLOCK_SIZE_N * BLOCK_SIZE_M);
+    //if(flops_fill_rate < 75)
+    //    return;
+    if(BLOCK_SIZE_M % 4 != 0 || BLOCK_SIZE_N % 4 != 0)
+        return;
+    
+    
     if(!conf) {
-        printf("%5.3f%% Fill TILE_SIZE_M=%-3d TILE_SIZE_N=%-3d BLOCK_M=%-2d BLOCK_N=%-2d TILE_SIZE_K=%-2d off=%d\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_M,BLOCK_SIZE_N,TILE_SIZE_K,off);
+        //printf("%5.3f%% Fill TILE_SIZE_M=%-3d TILE_SIZE_N=%-3d BLOCK_M=%-2d BLOCK_N=%-2d TILE_SIZE_K=%-2d off=%d\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_M,BLOCK_SIZE_N,TILE_SIZE_K,off);
+        printf("FILL=%5.4f TILE_SIZE_M=%-3d TILE_SIZE_N=%-3d BLOCK_M=%-2d BLOCK_N=%-2d TILE_SIZE_K=%-2d TILE_OFFSET=%d ./test -v my -m 512 -n 512 -k 512 -P 1\n",flops_fill_rate,TILE_SIZE_M,TILE_SIZE_N,BLOCK_SIZE_M,BLOCK_SIZE_N,TILE_SIZE_K,off_a);
         //printf("     conf=%d broad=%d\n",conf,broad);
     }
     
@@ -159,7 +166,7 @@ int main(int argc,char **argv)
     bank_size = 32;
     local_memory_limit = 49152;
     int wg_start = 32;
-    int wg_end = 1024;
+    int wg_end = 256;
 
     bool force_equal = false;
     int opt;
@@ -175,7 +182,7 @@ int main(int argc,char **argv)
             force_equal = true; 
             break;
         case 'W':
-            wg_start=wg_end = atoi(optarg);
+            wg_start = atoi(optarg);
             break;
         case 'b':
             bank_size = atoi(optarg);
@@ -192,28 +199,33 @@ int main(int argc,char **argv)
     if(argc==2 && std::string(argv[1]) == "-e")
 	    force_equal = true;
 
-    for(int wg_size = wg_start;wg_size<=wg_end;wg_size+=32) {
+    for(int wg_size = wg_start;wg_size<=wg_end;wg_size+=wg_start) {
         for(int wg_size_n=1;wg_size_n <= wg_size;wg_size_n++) {
             if(wg_size % wg_size_n != 0)
                 continue;
             int wg_size_m = wg_size / wg_size_n;
-            for(int bs_n = 1;bs_n <= wg_size;bs_n++) {
-                for(int bs_m = 1;bs_m <= wg_size;bs_m++) {
+            for(int bs_n = 4;bs_n <= wg_size;bs_n+=4) {
+                for(int bs_m = 4;bs_m <= wg_size;bs_m+=4) {
                     int tile_size_n = wg_size_n * bs_n;
                     int tile_size_m = wg_size_m * bs_m;
 		    if(force_equal && tile_size_m != tile_size_n)
 			    continue;
                     if(tile_size_n > 256 || tile_size_m > 256)
                         continue;
-                    for(int tile_size_k = 1;tile_size_k <= 32;tile_size_k ++) {
+                    if((bs_n+bs_m+bs_n*bs_m) > 255)
+                        continue;
+                    for(int tile_size_k = 1;tile_size_k <= std::max(tile_size_m,tile_size_n);tile_size_k ++) {
                         if(tile_size_m * tile_size_k % wg_size != 0 || tile_size_n * tile_size_k % wg_size != 0)
                             continue;
-                        for(int off = 0;off < 3;off++) {
-                            if((tile_size_k + off) * (2*off + tile_size_n + tile_size_m) * sizeof(float) + 16 >= local_memory_limit)
-                                continue;
-                          //if(!(tile_size_n == 128 && tile_size_m==128 && bs_m == 8 && bs_n == 8))
-                          //    continue;
-                            do_test(tile_size_m,tile_size_n,tile_size_k,bs_n,bs_m,off);
+                        for(int off_a = 0;off_a <= 4;off_a++) {
+                            //for(int off_b = 0;off_b <= 4;off_b++) {
+                            for(int off_b = off_a;off_b <= off_a;off_b++) {
+                                if((tile_size_k + off_a + off_b) * (off_a + off_b + tile_size_n + tile_size_m) * sizeof(float) + 16 >= local_memory_limit)
+                                    continue;
+                              //if(!(tile_size_n == 128 && tile_size_m==128 && bs_m == 8 && bs_n == 8))
+                              //    continue;
+                                do_test(tile_size_m,tile_size_n,tile_size_k,bs_n,bs_m,off_a,off_b);
+                            }
                         }
                     }
                 }

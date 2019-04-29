@@ -56,6 +56,10 @@
 //#define SIM
 //#define INV_TILE_ORDER
 
+#ifndef TILE_OFFSET
+#define TILE_OFFSET 0
+#endif
+
 #define lA(x,y) a_tile[(x)][(y) / BLOCK_SIZE_M][(y) % BLOCK_SIZE_M]
 #define lB(x,y) b_tile[(x)][(y) / BLOCK_SIZE_N][(y) % BLOCK_SIZE_N]
 //#define lA(x,y) a_tile[(x)][0][(y)]
@@ -68,8 +72,8 @@ void    sgemm(    int M,int N,int K,
         __global const float * restrict B,int ldb,
         __global float * restrict C,int ldc)
 {
-    ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][BLOCKS_IN_TILE_M][BLOCK_SIZE_M+1];
-    ALIGN_FLOAT4 __local float b_tile[TILE_SIZE_K][BLOCKS_IN_TILE_N][BLOCK_SIZE_N+1];
+    ALIGN_FLOAT4 __local float a_tile[TILE_SIZE_K][BLOCKS_IN_TILE_M][BLOCK_SIZE_M+TILE_OFFSET];
+    ALIGN_FLOAT4 __local float b_tile[TILE_SIZE_K][BLOCKS_IN_TILE_N][BLOCK_SIZE_N+TILE_OFFSET];
 
     float c[BLOCK_SIZE_M][BLOCK_SIZE_N] = {{0.0f}};
     float ap[BLOCK_SIZE_M];
@@ -121,26 +125,138 @@ void    sgemm(    int M,int N,int K,
     const int load_step_b = TILE_SIZE_N * TILE_SIZE_K / local_wg_size;
     #endif
     
+                const int mn_step = TILE_SIZE_M / ( WG_SIZE / TILE_SIZE_K );
+                int mn_pos = mn_step * (local_tile_id / TILE_SIZE_K);
+                int k_pos = local_tile_id % TILE_SIZE_K;
+
 
     int k=0;
     for(k=0;k<K;k+=TILE_SIZE_K) {
 
         #ifdef SIM
-        if(k == 0) {
-            //#pragma unroll
-            for(int i=0,read_pos = local_tile_id;i<load_step;i++) {
+        if(k==0) {
+            #pragma unroll
+            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
                 int tile_kdir = read_pos / TILE_SIZE_M;
                 int tile_tdir = read_pos % TILE_SIZE_M;
-                lA(tile_kdir,tile_tdir) = 1.3f * tile_kdir + tile_tdir;
+                //lA(tile_kdir,tile_tdir) = 1.3f * tile_kdir + tile_tdir + i + k;
+                lA(tile_kdir,tile_tdir) = 1.3f;
             }
-            for(int i=0,read_pos = local_tile_id;i<load_step;i++) {
+            #pragma unroll
+            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
                 int tile_kdir = read_pos / TILE_SIZE_N;
                 int tile_tdir = read_pos % TILE_SIZE_N;
-                lB(tile_kdir,tile_tdir) = 2.3f * tile_kdir + tile_tdir;
+                //lB(tile_kdir,tile_tdir) = 2.3f * tile_kdir + tile_tdir + i + k;
+                lB(tile_kdir,tile_tdir) = 2.3f;
             }
             barrier(CLK_LOCAL_MEM_FENCE);
         }
-        #else
+        #elif 0
+            //#pragma unroll
+            // NOT CORRECT!!!
+            int tile_kdir = local_tile_id; // 0-32
+            int k_rc  = tile_kdir + k;
+            #pragma unroll
+            for(int tile_tdir = 0;tile_tdir < 64;tile_tdir ++) {
+                int a_row = tile_tdir + tile_row0;
+                lA(tile_kdir,tile_tdir) = get_A(a_row,k_rc);
+            }
+            #pragma unroll
+            for(int tile_tdir = 0;tile_tdir < 64;tile_tdir ++) {
+                int b_col = tile_tdir + tile_col0;
+                lB(tile_kdir,tile_tdir) = get_B(k_rc,b_col);
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+        #elif (TILE_SIZE_M == 64 && TILE_SIZE_N == 64 && BLOCK_SIZE_M==8 && BLOCK_SIZE_N == 8)
+        {
+            int tile_tdir = local_tile_id;
+            #ifndef ATRANS
+            #pragma unroll
+            for(int i=0;i<load_step;i+=4) {
+                int tile_kdir = i; //read_pos / TILE_SIZE_M;
+                int a_row = tile_tdir + tile_row0;
+                int k_rc  = tile_kdir + k;
+                float4 tmp = *(__global float4 const *)&(get_A(a_row,k_rc));
+                lA(tile_kdir+0,tile_tdir) = tmp.x;
+                lA(tile_kdir+1,tile_tdir) = tmp.y;
+                lA(tile_kdir+2,tile_tdir) = tmp.z;
+                lA(tile_kdir+3,tile_tdir) = tmp.w;
+            }
+            #else
+            #pragma unroll
+            for(int i=0;i<load_step;i++) {
+                int tile_kdir = i; //read_pos / TILE_SIZE_M;
+                int a_row = tile_tdir + tile_row0;
+                int k_rc  = tile_kdir + k;
+                lA(tile_kdir,tile_tdir) = get_A(a_row,k_rc);
+            }
+            #endif
+            #ifdef BTRANS
+            #pragma unroll
+            for(int i=0;i<load_step;i+=4) {
+                int tile_kdir = i; //read_pos / TILE_SIZE_M;
+                int k_rc  = tile_kdir + k;
+                int b_col = tile_tdir + tile_col0;
+                float4 tmp = *(__global float4 const *)&(get_B(k_rc,b_col));
+                lB(tile_kdir+0,tile_tdir) = tmp.x;
+                lB(tile_kdir+1,tile_tdir) = tmp.y;
+                lB(tile_kdir+2,tile_tdir) = tmp.z;
+                lB(tile_kdir+3,tile_tdir) = tmp.w;
+                //lB(tile_kdir,tile_tdir) = get_B(k_rc,b_col);
+            }
+
+            #else
+            #pragma unroll
+            for(int i=0;i<load_step;i++) {
+                int tile_kdir = i; //read_pos / TILE_SIZE_M;
+                int k_rc  = tile_kdir + k;
+                int b_col = tile_tdir + tile_col0;
+                lB(tile_kdir,tile_tdir) = get_B(k_rc,b_col);
+            }
+            #endif
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        #elif (TILE_SIZE_M == 128 && TILE_SIZE_N == 128 && BLOCK_SIZE_M==8 && BLOCK_SIZE_N == 8 && TILE_SIZE_K==16)
+        {
+            int tile_kdir0 = local_tile_id / TILE_SIZE_M;
+            int tile_tdir  = local_tile_id % TILE_SIZE_M;
+            int a_row = tile_tdir + tile_row0;
+            int b_col = tile_tdir + tile_col0;
+
+            #pragma unroll
+            for(int i=0,tile_kdir=tile_kdir0;i<load_step;i++,tile_kdir+=WG_SIZE / TILE_SIZE_M) {
+                int k_rc  = tile_kdir + k;
+                lA(tile_kdir,tile_tdir) = get_A(a_row,k_rc);
+            }
+            #pragma unroll
+            for(int i=0,tile_kdir=tile_kdir0;i<load_step;i++,tile_kdir+=WG_SIZE / TILE_SIZE_M) {
+                int k_rc  = tile_kdir + k;
+                lB(tile_kdir,tile_tdir) = get_B(k_rc,b_col);
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        #elif 1
+        {
+            #pragma unroll
+            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
+                int tile_kdir = read_pos / TILE_SIZE_M;
+                int tile_tdir = read_pos % TILE_SIZE_M;
+                int a_row = tile_tdir + tile_row0;
+                int k_rc  = tile_kdir + k;
+                lA(tile_kdir,tile_tdir) = get_A(a_row,k_rc);
+            }
+            #pragma unroll
+            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
+                int tile_kdir = read_pos / TILE_SIZE_N;
+                int tile_tdir = read_pos % TILE_SIZE_N;
+                int k_rc  = tile_kdir + k;
+                int b_col = tile_tdir + tile_col0;
+                lB(tile_kdir,tile_tdir) = get_B(k_rc,b_col);
+            }
+            barrier(CLK_LOCAL_MEM_FENCE);
+        }
+        #endif
+        #if 0
         #if TILE_SIZE_M == TILE_SIZE_N
             #if  1 // TILE_SIZE_K > WG_SIZE || WG_SIZE % TILE_SIZE_K != 0
             //#if 1
@@ -148,20 +264,26 @@ void    sgemm(    int M,int N,int K,
             //#endif
             if(1) // good_row && good_col && k_rc < K) 
             {
-                const int mn_step = TILE_SIZE_M / ( WG_SIZE / TILE_SIZE_K );
-                int mn_pos = mn_step * (local_tile_id / TILE_SIZE_K);
-                int k_pos = local_tile_id % TILE_SIZE_K;
+                //const int mn_step = TILE_SIZE_M / ( WG_SIZE / TILE_SIZE_K );
+                //int mn_pos = mn_step * (local_tile_id / TILE_SIZE_K);
+                //int k_pos = local_tile_id % TILE_SIZE_K;
                 int a_row = tile_row0 + mn_pos;
-                int b_col = tile_col0 + mn_pos;
                 int k_rc  = k_pos + k;
                 int tile_mm = mn_pos;
-                #pragma unroll
+                #pragma unroll(4)
                 for(int mn=0;mn<mn_step;mn++)
                 {
                     lA(k_pos,tile_mm) = get_A(a_row,k_rc) ;
-                    lB(k_pos,tile_mm) = get_B(k_rc, b_col);
                     tile_mm ++;
                     a_row   ++;
+                }
+                int b_col = tile_col0 + mn_pos;
+                tile_mm = mn_pos;
+                #pragma unroll(4)
+                for(int mn=0;mn<mn_step;mn++)
+                {
+                    lB(k_pos,tile_mm) = get_B(k_rc, b_col);
+                    tile_mm ++;
                     b_col   ++;
                 }
             }
@@ -295,8 +417,10 @@ void    sgemm(    int M,int N,int K,
         barrier(CLK_LOCAL_MEM_FENCE);
         #endif
 
-        int lmt = min(K-k,TILE_SIZE_K);
-        for(int dk=0;dk<lmt;dk++) {
+        //int lmt = min(K-k,TILE_SIZE_K);
+        //for(int dk=0;dk<lmt;dk++) {
+        #pragma unroll(4)
+        for(int dk=0;dk<TILE_SIZE_K;dk++) {
             #pragma unroll
             for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
                 ap[dr] = a_tile[dk][lid0][dr];
@@ -317,19 +441,20 @@ void    sgemm(    int M,int N,int K,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
+    
     if(row + BLOCK_SIZE_M <= M && col + BLOCK_SIZE_N <= N) {
-        //#pragma unroll
+        #pragma unroll
         for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
-            #//pragma unroll
+            #pragma unroll
             for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                 C[(row+dr)*ldc+col+dc] = c[dr][dc];
             }
         }
     }
     else {
-        //#pragma unroll
+        #pragma unroll
         for(int dr=0;dr<BLOCK_SIZE_M;dr++) {
-            //#pragma unroll
+            #pragma unroll
             for(int dc=0;dc<BLOCK_SIZE_N;dc++) {
                 if(row + dr < M && col+dc < N)
                     C[(row+dr)*ldc+col+dc] = c[dr][dc];
