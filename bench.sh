@@ -1,18 +1,18 @@
 #for M in 0 2 4 8 16 24 32 48 64 96 128 192 256 384 512 1024 2048
 
 # nvidia
-DEV=1
-BCK="cublas cutlass clblas clblast"
+#DEV=1
+#BCK="cublas cutlass clblas clblast my"
 
 # radeon
 #DEV=2
-#BCK="miopengemm clblas clblast"
+#BCK="miopengemm clblas clblast my"
 
 # intel
-#DEV=0
-#BCK="cpu clblas clblast viennacl"
+DEV=0
+BCK="cpu clblas clblast viennacl my"
 
-EXTRA="-i 10000 -w 10000 "
+EXTRA="-i 100 -w 100 "
 randv()
 {
     python -c 'import math; import random ; print int(math.ceil(math.pow(2,random.random()*12)))'
@@ -24,7 +24,7 @@ pow2()
 }
 
 #for step in {0..12}
-for M in 0 16 32 64 128 256 512 1024 2048 4096
+for M in 0 16 32 64 128 256 512 1024 2048
 do
     if [ "$step" == "0" ]
     then
@@ -52,12 +52,6 @@ do
     fi
     for backend in $BCK
     do
-
-        export TILE_SIZE_N=32
-        export TILE_SIZE_M=64
-        export TILE_SIZE_K=8
-        export BLOCK_X=4
-        export BLOCK_Y=4
 
         if [ "$K" == 0 ]
         then
