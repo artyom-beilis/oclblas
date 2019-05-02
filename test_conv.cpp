@@ -9,15 +9,36 @@
 #include <string.h>
 
 conv_base *get_conv_miopen(int p,int d);
+conv_base *get_conv_cudnn(int p,int d);
 conv_base *get_conv_ref();
 
 conv_base *get(std::string const &name,int plat,int dev)
 {
+#ifndef __HIP_PLATFORM_HCC__
+    if(name == "cudnn")
+        return get_conv_cudnn(plat,dev);
+#endif	
     if(name == "miopen")
         return get_conv_miopen(plat,dev);
     return nullptr;
 }
 
+
+bool compare_arrays(std::vector<float> const &a,std::vector<float> const &b)
+{
+	if(a.size()!=b.size()) {
+		std::cerr << "size error " << std::endl;
+		return false;
+	}
+	for(unsigned i=0;i<a.size();i++) {
+		float diff = fabs(a[i]-b[i]);
+		if(diff > 1e-3) {
+			std::cerr << "error at " << i << " " << a[i] << " " << b[i] << " diff=" << diff;
+			return false;
+		}
+	}
+	return true;
+}
 
 int main(int argc,char **argv)
 {
@@ -122,10 +143,7 @@ int main(int argc,char **argv)
             conv->sync();
             if(do_check) {
                 conv->copy_back();
-		if(vC != vC_ref) {
-			for(size_t i=0;i<vC.size();i++) {
-				std::cerr << vC[i] << " " << vC_ref[i] << std::endl;
-			}
+		if(!compare_arrays(vC,vC_ref)) {
 			std::cerr << "FAILED" << std::endl;
 		}
             }

@@ -11,6 +11,7 @@
 #define check(x) do { miopenStatus_t r=(x); if(r!=miopenStatusSuccess) throw std::runtime_error("Call failed with status " + std::to_string(int(r)) + " at line " + std::to_string(__LINE__)); } while(0)
 
 #if !MIOPEN_BACKEND_OPENCL
+namespace {
 struct stream {
 	hipStream_t operator()() const { return s_; }
 	stream() {
@@ -53,6 +54,8 @@ struct buffer {
 	void *m_;
 	
 };
+
+} // namespace
 #endif
 
 class conv_miopen : public conv_base {
