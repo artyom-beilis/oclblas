@@ -120,13 +120,13 @@ public:
         if(Atr_)
             opts << " -DATRANS";
 
-        //std::cerr << opts.str() << std::endl;
+        std::cerr << opts.str() << std::endl;
         
         std::ifstream tmp;
         tmp.open("gemm.cl");
         
         if(!tmp) {
-            throw std::runtime_error("Failed to open k.cl");
+            throw std::runtime_error("Failed to open gemm.cl");
         }
         std::ostringstream ss;
         ss << tmp.rdbuf();
@@ -215,4 +215,5 @@ private:
 };
 
 sgemm_base *get_my(int p,int d) { return new sgemm_my(p,d); };
+sgemm_base *get_external(int p,int d) { return new sgemm_my(p,d); };
 

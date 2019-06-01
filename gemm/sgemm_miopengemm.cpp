@@ -80,4 +80,5 @@ private:
 };
 
 sgemm_base *get_miopengemm(int p,int d) { return new sgemm_miopengemm(p,d); };
+sgemm_base *get_external(int p,int d) { return new sgemm_miopengemm(p,d); };
 

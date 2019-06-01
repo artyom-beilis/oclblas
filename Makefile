@@ -24,8 +24,8 @@ test:$(OBJECTS) cutlass_gemm.o
 test_cu: sgemm_mycuda.cpp test.cpp
 	g++ $(CFLAGS) -DCUDA_ONLY -o test_cu test.cpp sgemm_mycuda.cpp $(LINKFLAGS) 
 
-test_conv: test_conv.cpp conv_miopen.cpp conv_base.h conv_ref.cpp conv_cudnn.cpp
-	g++ -I /usr/local/cuda-9.2/targets/x86_64-linux/include/ -I /home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/include -I /opt/rocm/miopen-opencl/include -I /home/artik/Packages/viennacl/viennacl-dev -Wall -std=c++11 -g -O2 -o test_conv test_conv.cpp conv_cudnn.cpp conv_ref.cpp conv_miopen.cpp -L /opt/rocm/miopen-opencl/lib/ -L /home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/lib64/ -L /usr/local/cuda-9.2/targets/x86_64-linux/lib -lOpenCL -lMIOpen -lcudnn -lcudart -Wl,-rpath=/opt/rocm/miopen-opencl/lib/:/home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/lib64/:/usr/local/cuda-9.2/targets/x86_64-linux/lib -lopenblas  
+test_conv: test_conv.cpp conv_miopen.cpp conv_base.h conv_ref.cpp conv_cudnn.cpp conv_libdnn.cpp
+	g++ -std=c++11 -I /home/artik/Packages/viennacl/viennacl-dev -I /opt/caffe/caffe_ocl_old_fixed/include/ -I /usr/local/cuda-9.2/targets/x86_64-linux/include/ -I /home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/include -I /opt/rocm/miopen-opencl/include -I /home/artik/Packages/viennacl/viennacl-dev -Wall -std=c++11 -g -O2 -o test_conv test_conv.cpp conv_cudnn.cpp conv_ref.cpp conv_miopen.cpp conv_libdnn.cpp -L /opt/rocm/miopen-opencl/lib/ -L /home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/lib64/ -L /usr/local/cuda-9.2/targets/x86_64-linux/lib -lOpenCL -lMIOpen -lcudnn -lcudart -Wl,-rpath=/opt/rocm/miopen-opencl/lib/:/home/artik/Packages/cuda/cudnn-9.0-linux-x64-v7.1/cuda/lib64/:/usr/local/cuda-9.2/targets/x86_64-linux/lib:/opt/caffe/caffe_ocl_old_fixed/lib -lopenblas -L /opt/caffe/caffe_ocl_old_fixed/lib  -lcaffe
 
 test_conv_hip: test_conv.cpp conv_miopen.cpp conv_base.h conv_ref.cpp
 	g++ -D __HIP_PLATFORM_HCC__   -I /opt/rocm/hip/include -I /opt/rocm/miopen/include -Wall -std=c++11 -g -O2 -o test_conv_hip test_conv.cpp conv_miopen.cpp conv_ref.cpp -L /opt/rocm/miopen/lib/ -lMIOpen -Wl,-rpath=/opt/rocm/miopen/lib/:/opt/rocm/hip/lib -L /opt/rocm/hip/lib -lhip_hcc -lopenblas

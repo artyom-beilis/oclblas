@@ -1,6 +1,6 @@
 #include <cublas.h>
 #include <cublas_v2.h>
-#include <cuda_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 #include <cuda.h>
 #include <vector>
 #include <iostream>
@@ -19,9 +19,9 @@ public:
 		throw std::runtime_error(std::string("Failed to create cublas:") + std::to_string(status));
     }
     virtual ~sgemm_cublas() { 
-        cudaFree(a_);
-        cudaFree(b_);
-        cudaFree(c_);
+        hipFree(a_);
+        hipFree(b_);
+        hipFree(c_);
         cublasDestroy(h_);
     }
     virtual void config(int M,int N,int K,bool Atr,bool Btr)
@@ -31,15 +31,15 @@ public:
 	K_ = K;
         Atr_ = Atr;
         Btr_ = Btr;
-        cudaMalloc((void **)&a_,M*K*sizeof(float));
-        cudaMalloc((void **)&b_,K*N*sizeof(float));
-        cudaMalloc((void **)&c_,M*N*sizeof(float));
+        hipMalloc((void **)&a_,M*K*sizeof(float));
+        hipMalloc((void **)&b_,K*N*sizeof(float));
+        hipMalloc((void **)&c_,M*N*sizeof(float));
     }
     virtual void set_A(float const *A) { 
-        cudaMemcpy(a_,A,M_*K_*sizeof(float),cudaMemcpyHostToDevice);
+        hipMemcpy(a_,A,M_*K_*sizeof(float),hipMemcpyHostToDevice);
     }
     virtual void set_B(float const *B) { 
-        cudaMemcpy(b_,B,K_*N_*sizeof(float),cudaMemcpyHostToDevice);
+        hipMemcpy(b_,B,K_*N_*sizeof(float),hipMemcpyHostToDevice);
     }
     virtual void set_C(float *C) { 
         c_host_ = C;
@@ -59,10 +59,10 @@ public:
                     c_,N_);
     }
     virtual void sync() {
-        cudaDeviceSynchronize();
+        hipDeviceSynchronize();
     }
     virtual void copy_back() {
-        cudaMemcpy(c_host_,c_,M_*N_*sizeof(float),cudaMemcpyDeviceToHost);
+        hipMemcpy(c_host_,c_,M_*N_*sizeof(float),hipMemcpyDeviceToHost);
     }
 private:
     cublasHandle_t h_;

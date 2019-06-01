@@ -8,9 +8,8 @@
 #include <math.h>
 #include <string.h>
 
-
 sgemm_base *get_cpu();
-sgemm_base *get_cublas();
+//sgemm_base *get_cublas();
 sgemm_base *get_cutlass();
 sgemm_base *get_clblast(int p,int d);
 sgemm_base *get_miopengemm(int p,int d);
@@ -19,30 +18,14 @@ sgemm_base *get_viennacl(int p,int d);
 sgemm_base *get_my(int p,int d);
 sgemm_base *get_mycuda();
 
+sgemm_base *get_external(int p,int d);
+
 sgemm_base *get(std::string const &name,int plat,int dev)
 {
-#ifndef CUDA_ONLY
     if(name == "cpu")
         return get_cpu();
-    if(name == "cutlass")
-        return get_cutlass();
-    if(name == "cublas")
-        return get_cublas();
-    if(name == "miopengemm")
-        return get_miopengemm(plat,dev);
-    if(name == "clblast")
-        return get_clblast(plat,dev);
-    if(name == "clblas")
-        return get_clblas(plat,dev);
-    if(name == "viennacl")
-        return get_viennacl(plat,dev);
-    if(name == "my")
-        return get_my(plat,dev);
-#else
-    if(name == "mycuda")
-        return get_mycuda();
-#endif
-    return nullptr;
+    else
+	return get_external(plat,dev);
 }
 
 void check(float *A,float *B,float *C,int M,int N,int K,bool Atr,bool Btr)
@@ -115,7 +98,7 @@ int main(int argc,char **argv)
     int opt;
     bool sync=false;
     bool sim=false;
-    std::string mode="cpu";
+    std::string mode="";
     bool do_check = false;
     while((opt=getopt(argc,argv,"m:n:k:i:a:b:v:csw:SP:D:"))!=-1) {
         switch(opt) {

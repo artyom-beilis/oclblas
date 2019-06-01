@@ -10,17 +10,13 @@
 
 conv_base *get_conv_miopen(int p,int d);
 conv_base *get_conv_cudnn(int p,int d);
+conv_base *get_conv_libdnn(int p,int d);
 conv_base *get_conv_ref();
+conv_base *get_external(int p,int d);
 
 conv_base *get(std::string const &name,int plat,int dev)
 {
-#ifndef __HIP_PLATFORM_HCC__
-    if(name == "cudnn")
-        return get_conv_cudnn(plat,dev);
-#endif	
-    if(name == "miopen")
-        return get_conv_miopen(plat,dev);
-    return nullptr;
+	return get_external(plat,dev);
 }
 
 

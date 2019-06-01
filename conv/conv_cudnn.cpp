@@ -163,4 +163,5 @@ public:
 
 
 conv_base *get_conv_cudnn(int p,int d) { return new conv_cudnn(d); };
+conv_base *get_external(int p,int d) { return new conv_cudnn(d); };
 

@@ -148,7 +148,7 @@ void do_test(int ts_m=32,int ts_n=32,int tk=16,int bx=2,int by=2,int off_a = 0,i
     double flops_fill_rate = 100.0 * (BLOCK_SIZE_N * BLOCK_SIZE_M) / (BLOCK_SIZE_M + BLOCK_SIZE_N + BLOCK_SIZE_N * BLOCK_SIZE_M);
     //if(flops_fill_rate < 75)
     //    return;
-    if(BLOCK_SIZE_M % 4 != 0 || BLOCK_SIZE_N % 4 != 0)
+    if(BLOCK_SIZE_M % 2 != 0 || BLOCK_SIZE_N % 2 != 0)
         return;
     
     
