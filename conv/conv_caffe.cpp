@@ -49,7 +49,11 @@ public:
 		proto << buf;
 		proto.close();
 
-		caffe_.reset(new caffe::Net<float>("/tmp/conv.prototxt",caffe::TEST));
+		caffe_.reset(new caffe::Net<float>("/tmp/conv.prototxt",caffe::TEST
+#ifdef GREENTEA_QUEUE_COUNT
+            ,caffe::Caffe::GetDefaultDevice()
+#endif
+        ));
 
 	}
 	virtual void set_kernel(float const *A)

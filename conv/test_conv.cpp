@@ -125,13 +125,8 @@ int main(int argc,char **argv)
     }
 
     auto shape = conv->get_out_shape();
-    fprintf(stderr,"Input %d:%d:%d:%d, Output %d:%d:%d:%d Kernel=%d, Stride=%d, Pad=%d\n",
-    			Batch,Chan,Dim,Dim, shape[0],shape[1],shape[2],shape[3],Kernel,sTride,Pad);
 
     assert(int(vC.size()) == shape[0]*shape[1]*shape[2]*shape[3]);
-
-
-    std::cerr << "Starting " << std::endl;
 
     auto start = std::chrono::system_clock::now();
     for(int i=-skip;i<iters;i++) {
@@ -152,5 +147,7 @@ int main(int argc,char **argv)
     conv->sync();
     auto stop = std::chrono::system_clock::now();
     double duration = std::chrono::duration_cast<std::chrono::duration<double> > ((stop-start)).count();
-    std::cout << (flops / duration * 1e-9)  << " GFLOPS " << (duration * 1e+3) / iters << " ms"<< std::endl;
+    printf("%8.0f GFlops, %8.2f ms,    In = %2d x %3d x %3d  x %3d, Out = %2d x %3d x %3d  x %3d,K = %2d,S = %d, P = %2d\n",
+            (flops / duration * 1e-9),(duration * 1e+3) / iters,
+            Batch,Chan,Dim,Dim, shape[0],shape[1],shape[2],shape[3],Kernel,sTride,Pad);
 }

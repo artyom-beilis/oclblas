@@ -123,7 +123,10 @@ public:
         std::cerr << opts.str() << std::endl;
         
         std::ifstream tmp;
-        tmp.open("gemm.cl");
+#ifndef MYKERNEL_PATH
+#define MYKERNEL_PATH 
+#endif
+        tmp.open(MYKERNEL_PATH  "gemm.cl");
         
         if(!tmp) {
             throw std::runtime_error("Failed to open gemm.cl");

@@ -75,4 +75,5 @@ private:
 };
 
 sgemm_base *get_clblast(int p,int d) { return new sgemm_clblast(p,d); };
+sgemm_base *get_external(int p,int d) { return new sgemm_clblast(p,d); };
 

@@ -62,7 +62,7 @@ public:
         NVRTC_SAFE_CALL(nvrtcGetProgramLogSize(prog, &logSize));
         char *log = new char[logSize];
         NVRTC_SAFE_CALL(nvrtcGetProgramLog(prog, log));
-        std::cout << log << '\n';
+        std::cerr << log << '\n';
         delete[] log;
         if (compileResult != NVRTC_SUCCESS) {
             exit(1);
@@ -84,7 +84,7 @@ public:
         CUDA_SAFE_CALL(cuModuleGetFunction(&kernel, module, "sgemm"));
 	int regs=-1;
 	CUDA_SAFE_CALL(cuFuncGetAttribute(&regs,CU_FUNC_ATTRIBUTE_NUM_REGS,kernel));
-	printf("%s numRegs=%d\n","sgemm",regs);
+	fprintf(stderr,"%s numRegs=%d\n","sgemm",regs);
   }
   void call(int wg[2],int lgw[2],int M,int N,int K,float *A,int lda,float *B,int ldb,float *C,int ldc)
   {
@@ -138,6 +138,7 @@ public:
         K_= K;
         Atr_ = Atr;
         Btr_ = Btr;
+        int off;
         
         cudaMalloc((void **)&a_,M*K*sizeof(float));
         cudaMalloc((void **)&b_,K*N*sizeof(float));
@@ -146,18 +147,38 @@ public:
 
         std::vector<std::string> opts;
 
-	tile_size_m_ = 32;
-	tile_size_n_ = 32;
-	block_size_m_ = 4;
-	block_size_n_ = 4;
+        if(M >= 512 && N >= 512) {
+            tile_size_m_ = 128;
+            tile_size_n_ = 128;
+            block_size_m_ = 8;
+            block_size_n_ = 8;
+            tile_size_k_ = 16;
+            off = 1;
+        }
+        else if(M >= 128 && N>= 128) {
+            tile_size_m_ = 64;
+            tile_size_n_ = 64;
+            block_size_m_ = 8;
+            block_size_n_ = 8;
+            tile_size_k_ = 16;
+            off = 1;
+        }
+        else {
+            tile_size_m_ = 32;
+            tile_size_n_ = 32;
+            block_size_m_ = 4;
+            block_size_n_ = 4;
+            tile_size_k_ = 32;
+            off = 0;
+        }
+
+
 
 	subst(tile_size_m_,"TILE_SIZE_M");
 	subst(tile_size_n_,"TILE_SIZE_N");
 	subst(block_size_m_,"BLOCK_M");
 	subst(block_size_n_,"BLOCK_N");
-	int off=0;
 	subst(off,"TILE_OFFSET");
-    tile_size_k_ = 2;
     subst(tile_size_k_,"TILE_SIZE_K");
     int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
     if(tile_size_m_ % block_size_m_ != 0 || tile_size_n_ % block_size_n_ != 0) {
@@ -190,7 +211,10 @@ public:
             opts.push_back("ATRANS");
 
         std::ifstream tmp;
-        tmp.open("gemm.cl");
+#ifndef MYKERNEL_PATH
+#define MYKERNEL_PATH
+#endif
+        tmp.open(MYKERNEL_PATH  "gemm.cl");
 
         if(!tmp) {
             throw std::runtime_error("Failed to open gemm.cl");
@@ -242,4 +266,5 @@ private:
 };
 
 sgemm_base *get_mycuda() { return new sgemm_mycuda(); };
+sgemm_base *get_external(int,int) { return get_mycuda(); }
 

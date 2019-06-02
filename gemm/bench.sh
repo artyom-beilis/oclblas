@@ -9,8 +9,12 @@
 #BCK="miopengemm clblas clblast my"
 
 # intel
+#DEV=0
+#BCK="cpu clblas clblast viennacl my"
+
+# nvidia only
 DEV=0
-BCK="cpu clblas clblast viennacl my"
+BCK="cublas clblas clblast my mycuda"
 
 EXTRA="-i 100 -w 100 "
 randv()
@@ -64,7 +68,7 @@ do
                 #continue
                 EXTRA="$EXTRA -i 10"
             fi
-            v=$(./test -v $backend -m $M -n $N -k $K $EXTRA -P $DEV 2>/dev/null | awk '{print $1}')
+            v=$(./test_gemm_$backend -m $M -n $N -k $K $EXTRA -P $DEV 2>/dev/null | awk '{print $1}')
             printf '%10.2f, ' $v
         fi
     done

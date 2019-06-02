@@ -125,12 +125,12 @@ public:
 		}
 		
 		check(cudnnGetConvolutionForwardAlgorithm(handle_,inp_,ker_,desc_,out_,CUDNN_CONVOLUTION_FWD_PREFER_FASTEST,0,&perf_));
-		std::cerr << "alogo=" << int(perf_) << std::endl;
+		//std::cerr << "alogo=" << int(perf_) << std::endl;
 
 		ws_size_ = 0;
 		check(cudnnGetConvolutionForwardWorkspaceSize(handle_,inp_,ker_,desc_,out_,perf_,&ws_size_));
 
-		std::cerr << "ws=" << ws_size_ << std::endl;
+		//std::cerr << "ws=" << ws_size_ << std::endl;
 
 		buf_ws_ =   std::move(dalloc( ws_size_));
         	buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));

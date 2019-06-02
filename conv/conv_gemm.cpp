@@ -56,10 +56,10 @@ public:
 		
 		ws_size_ = out_c_*out_h_*out_w_*sizeof(float);
 
-		buf_ws_ =   std::move(dalloc( ws_size_));
-        	buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));
-        	buf_out_ =  std::move(dalloc( b_*out_c_*out_h_*out_w_*sizeof(float)));
-		buf_kern_ = std::move(dalloc( par_.num_outputs*c_*par_.kernel_h*par_.kernel_w*sizeof(float)));
+        buf_ws_ =   std::move(dalloc( ws_size_));
+        buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));
+        buf_out_ =  std::move(dalloc( b_*out_c_*out_h_*out_w_*sizeof(float)));
+        buf_kern_ = std::move(dalloc( par_.num_outputs*c_*par_.kernel_h*par_.kernel_w*sizeof(float)));
 
 
 	}

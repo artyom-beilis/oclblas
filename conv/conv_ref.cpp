@@ -111,8 +111,9 @@ public:
 				}
 			}
 			#endif
-			if(N==0)
-				printf("M=%d N=%d K=%d\n",kernel_rows_,im2col_rows_,kernel_cols_); 
+			//if(N==0) {
+			//	printf("M=%d N=%d K=%d\n",kernel_rows_,im2col_rows_,kernel_cols_); 
+            //}
 			cblas_sgemm(CblasRowMajor,CblasNoTrans, CblasTrans,
 					kernel_rows_,im2col_rows_,kernel_cols_,
 					1.0f,
