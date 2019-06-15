@@ -40,11 +40,13 @@ if(CAFFE_OCL_PATH AND OCL_PATH)
 	target_link_libraries(test_conv_caffe_ocl ${CAFFE_OCL_LIB} openblas)
 endif()
 
+find_path(HIP_HDR hip/hip_runtime.h HINTS /opt/rocm/hip/include)
+find_library(HIP_LIB hip_hcc HINTS /opt/rocm/hip/lib)
+
 
 if(CAFFE_HIP_PATH)
 	find_path(CAFFE_HIP_HDR caffe/net.hpp HINTS ${CAFFE_HIP_PATH}/include)
 	find_library(CAFFE_HIP_LIB caffe HINTS ${CAFFE_HIP_PATH}/lib ${CAFFE_HIP_PATH}/build/lib)
-	find_path(HIP_HDR hip/hip_runtime.h HINTS /opt/rocm/hip/include)
 	find_path(HIP_RND_HDR hiprand.h  HINTS /opt/rocm/hiprand/include)
 	find_path(HIP_LOG_HDR CXLActivityLogger.h HINTS /opt/rocm/profiler/CXLActivityLogger/include/)
 	find_path(HIP_ROCRAND_HDR rocrand.h HINTS /opt/rocm/rocrand/include/)
@@ -53,4 +55,22 @@ if(CAFFE_HIP_PATH)
 	target_compile_definitions(test_conv_caffe_hip PUBLIC __HIP_PLATFORM_HCC__) 
 	target_link_libraries(test_conv_caffe_hip ${CAFFE_HIP_LIB} openblas)
 endif()
+
+if(MIOPEN_HIP_PATH)
+	find_path(MIOPEN_HIP_HDR miopen/miopen.h HINTS ${MIOPEN_HIP_PATH}/include)
+	find_library(MIOPEN_HIP_LIB MIOpen HINTS ${MIOPEN_HIP_PATH}/lib)
+	add_executable(test_conv_miopen_hip test_conv.cpp conv_ref.cpp conv_miopen.cpp)
+	target_compile_definitions(test_conv_miopen_hip PUBLIC __HIP_PLATFORM_HCC__) 
+	target_include_directories(test_conv_miopen_hip PUBLIC ${MIOPEN_HIP_HDR} ${HIP_HDR})
+	target_link_libraries(test_conv_miopen_hip ${MIOPEN_HIP_LIB} ${HIP_LIB} openblas)
+endif()
+
+if(MIOPEN_OCL_PATH)
+	find_path(MIOPEN_OCL_HDR miopen/miopen.h HINTS ${MIOPEN_OCL_PATH}/include)
+	find_library(MIOPEN_OCL_LIB MIOpen HINTS ${MIOPEN_OCL_PATH}/lib)
+	add_executable(test_conv_miopen_ocl test_conv.cpp conv_ref.cpp conv_miopen.cpp)
+	target_include_directories(test_conv_miopen_ocl PUBLIC ${MIOPEN_OCL_HDR} ${OCL_PATH})
+	target_link_libraries(test_conv_miopen_ocl ${MIOPEN_OCL_LIB} ${OCL_LIB} openblas)
+endif()
+
 

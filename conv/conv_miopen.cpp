@@ -203,4 +203,5 @@ public:
 
 
 conv_base *get_conv_miopen(int p,int d) { return new conv_miopen(p,d); };
+conv_base *get_external(int p,int d) { return new conv_miopen(p,d); };
 
