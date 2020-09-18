@@ -73,4 +73,11 @@ if(MIOPEN_OCL_PATH)
 	target_link_libraries(test_conv_miopen_ocl ${MIOPEN_OCL_LIB} ${OCL_LIB} openblas)
 endif()
 
+if(CLBLAST_PATH)
+	find_path(CLBLAST_HDR clblast.h HINTS ${CLBLAST_PATH}/include)
+	find_library(CLBLAST_LIB clblast HINTS ${CLBLAST_PATH}/lib ${CLBLAST_PATH}/lib64)
+	add_executable(test_conv_clblast test_conv.cpp conv_ref.cpp conv_clblast.cpp)
+	target_include_directories(test_conv_clblast PUBLIC ${CLBLAST_HDR} ${OCL_PATH})
+	target_link_libraries(test_conv_clblast ${CLBLAST_LIB} ${OCL_LIB} openblas)
+endif()
 

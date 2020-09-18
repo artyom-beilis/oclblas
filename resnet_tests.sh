@@ -1,15 +1,17 @@
 export GLOG_minloglevel=3
-BATCH=16
-for tester in test_conv_cudnn test_conv_caffe_cuda  test_conv_caffe_ocl
-do
-    TEST=./$tester
+
+run_test()
+{
+    tester="$1"
+    BATCH=64
+    TEST="$tester -i 200 -w 200"
     DEV=0
 
     echo "============ $tester =============== "
 
     echo "ResNet 50"
 
-    $TEST  -p $DEV -c  -B $BATCH -C 128 -D 28  -P 0 -K 1 -T 2 -N 256
+    $TEST  -p $DEV -c  -B $BATCH -C 128 -D 28  -P 0 -K 1 -T 2 -N 256 
     $TEST  -p $DEV -c  -B $BATCH -C 128 -D 28  -P 1 -K 3 -T 1 -N 128
     $TEST  -p $DEV -c  -B $BATCH -C 128 -D 28  -P 1 -K 3 -T 2 -N 256
     $TEST  -p $DEV -c  -B $BATCH -C 256 -D 14  -P 0 -K 1 -T 2 -N 512
@@ -32,5 +34,10 @@ do
     $TEST  -p $DEV -c  -B $BATCH -C 192 -D 13   -P 1 -K 3  -T 1 -N 384
     $TEST  -p $DEV -c  -B $BATCH -C 192 -D 13   -P 1 -K 3  -T 1 -N 256
 
+}
+
+for tester in test_conv_*
+do
+    run_test ./$tester | tee "perf-test-$tester.log"
 done
 
