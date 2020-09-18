@@ -125,7 +125,8 @@ public:
 		}
 		
 		check(cudnnGetConvolutionForwardAlgorithm(handle_,inp_,ker_,desc_,out_,CUDNN_CONVOLUTION_FWD_PREFER_FASTEST,0,&perf_));
-		//std::cerr << "alogo=" << int(perf_) << std::endl;
+		//perf_ = (cudnnConvolutionFwdAlgo_t)6;
+        //std::cerr << "alogo=" << int(perf_) << std::endl;
 
 		ws_size_ = 0;
 		check(cudnnGetConvolutionForwardWorkspaceSize(handle_,inp_,ker_,desc_,out_,perf_,&ws_size_));
