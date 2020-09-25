@@ -4,10 +4,11 @@ float16 load_4x4_tile_and_transform(__global const float * restrict channel,int 
 {
     float4 a[4];
     __global const float * frame = channel + row * stride + col;
-
+    
+    int r=row;
     #pragma unroll
-    for(int i=0;i<4;i++,row++,frame+=stride) {
-        if(row >= 0 && row < H) {
+    for(int i=0;i<4;i++,r++,frame+=stride) {
+        if(r >= 0 && r < H) {
             if(col >= 0 && col + 3 < W) {
                 a[i] = vload4(0,frame);
             }
@@ -27,6 +28,7 @@ float16 load_4x4_tile_and_transform(__global const float * restrict channel,int 
             a[i] = (float4)(0.0f,0.0f,0.0f,0.0f);
         }
     }
+
 
     
     float bta[4][4];
@@ -141,7 +143,7 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
     int row = r * 2 - pH;
     int col = c * 2 - pW;
     float16 tile = load_4x4_tile_and_transform(data + bc*H*W,W,H,W,row,col);
-    tiles[bc + r*w_tiles + c] = tile;
+    tiles[bc * w_tiles * h_tiles + r*w_tiles + c] = tile;
 }
 
 #ifndef TILES_IN_WG
@@ -185,7 +187,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         if(tile_row_col < tiles2d) {
             #pragma unroll
             for(int i=0;i<kstep;i++) {
-                local_tiles[tile_wg_id][kernel_wg_id*kstep +i]  = tile_base[tile_wg_id*16 + kernel_wg_id*kstep + i];
+                local_tiles[tile_wg_id][kernel_wg_id*kstep +i]  = tile_base[kernel_wg_id*kstep + i];
             }
         }
         else {
@@ -196,8 +198,9 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         }
         if(kernel_id < oC) {
             #pragma unroll
-            for(int i=0;i<tstep;i++)
+            for(int i=0;i<tstep;i++) {
                 local_kernels[kernel_wg_id][tile_wg_id*tstep+i] = kernels_base[tile_wg_id*tstep+i];
+            }
         }
         else {
             #pragma unroll
@@ -228,22 +231,18 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 
     if(row < oH) {
         if(col < oW) {
-            //printf("W0 %f\n",res.s0);
             result[0] = res.s0;
         }
         if(col+1 < oW) {
-            ///printf("W1 %f\n",res.s1);
             result[1] = res.s1;
         }
     }
     result += oW;
     if(row + 1 < oH) {
         if(col < oW) {
-            ///printf("W2 %f\n",res.s2);
             result[0] = res.s2;
         }
         if(col+1 < oW) {
-            ///printf("W3 %f\n",res.s3);
             result[1] = res.s3;
         }
     }

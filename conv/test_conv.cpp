@@ -29,14 +29,13 @@ bool compare_arrays(std::vector<float> const &a,std::vector<float> const &b)
 	for(unsigned i=0;i<a.size();i++) {
 		float diff = fabs(a[i]-b[i]);
 		if(diff > 1e-3) {
-			std::cerr << "error at " << i << " " << a[i] << " " << b[i] << " diff=" << diff;
-			return false;
+			std::cerr << "error at " << i << " " << a[i] << " " << b[i] << " diff=" << diff << std::endl;
 		}
 	}
 	return true;
 }
 
-int main(int argc,char **argv)
+int cmain(int argc,char **argv)
 {
     int Batch=10;
     int Chan=32;
@@ -151,3 +150,16 @@ int main(int argc,char **argv)
             (flops / duration * 1e-9),(duration * 1e+3) / iters,
             Batch,Chan,Dim,Dim, shape[0],shape[1],shape[2],shape[3],Kernel,sTride,Pad);
 }
+
+int main(int argc,char **argv)
+{
+    try {
+        cmain(argc,argv);
+    }
+    catch(std::exception const &e) {
+        std::cerr << e.what() << std::endl;
+        return 1;
+    }
+    return 0;
+}
+

@@ -87,13 +87,14 @@ public:
 
 	virtual void config(conv_param const &param,int B,int C,int H,int W)
 	{
-        std::cerr << "Config " << std::endl;
 		conv_base::config(param,B,C,H,W);
         if(param.stride_h != 1 || param.stride_w != 1 || param.kernel_w != 3 || param.kernel_h != 3)
             throw std::runtime_error("Unsupported");
 
         buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));
-        int tiled_size = b_*c_*align_up(h_+par_.pad_h*2,2) * align_up(w_ + par_.pad_w*2,2) * sizeof(float);
+        htiles_ = (out_h_ + 1) / 2;
+        wtiles_ = (out_w_ + 1) / 2;
+        int tiled_size = b_*c_*htiles_*wtiles_*16 * sizeof(float);
         buf_tiled_in_ = std::move(dalloc(tiled_size));
 
         buf_out_ =  std::move(dalloc( b_*out_c_*out_h_*out_w_*sizeof(float)));
@@ -105,8 +106,9 @@ public:
 	{
 		h2d(buf_kern_,A,par_.num_outputs*c_*par_.kernel_h*par_.kernel_w*sizeof(float));
 	}
-	virtual void set_input(float const *A) {
-        h2d(buf_in_, A, b_*c_*h_*w_*sizeof(float));
+	virtual void set_input(float const *A) 
+    {
+           h2d(buf_in_, A, b_*c_*h_*w_*sizeof(float));
 	}
 	virtual void set_output(float *outp) { host_out_ = outp; }
 
@@ -123,21 +125,19 @@ public:
         auto queue_plain = queue_();
         int ind;
         ind = 0;
-        int htiles = (out_h_ + 1) / 2;
-        int wtiles = (out_w_ + 1) / 2;
         tiles_conv_.setArg(ind++,b_*c_);
         tiles_conv_.setArg(ind++,h_);
         tiles_conv_.setArg(ind++,w_);
         tiles_conv_.setArg(ind++,par_.pad_h);
         tiles_conv_.setArg(ind++,par_.pad_w);
-        tiles_conv_.setArg(ind++,htiles);
-        tiles_conv_.setArg(ind++,wtiles);
+        tiles_conv_.setArg(ind++,htiles_);
+        tiles_conv_.setArg(ind++,wtiles_);
         tiles_conv_.setArg(ind++,buf_in_);
         tiles_conv_.setArg(ind++,buf_tiled_in_);
 
         queue_.enqueueNDRangeKernel(tiles_conv_,
                                         cl::NullRange,
-                                        cl::NDRange(b_*c_,htiles,wtiles),
+                                        cl::NDRange(b_*c_,htiles_,wtiles_),
                                         cl::NullRange,nullptr,nullptr);
         ind=0;
         kernel_conv_.setArg(ind++,c_*out_c_);
@@ -151,14 +151,14 @@ public:
         win_conv_.setArg(ind++,out_c_);
         win_conv_.setArg(ind++,out_h_);
         win_conv_.setArg(ind++,out_w_);
-        win_conv_.setArg(ind++,htiles);
-        win_conv_.setArg(ind++,wtiles);
+        win_conv_.setArg(ind++,htiles_);
+        win_conv_.setArg(ind++,wtiles_);
         win_conv_.setArg(ind++,buf_tiled_in_);
         win_conv_.setArg(ind++,buf_conv_kern_);
         win_conv_.setArg(ind++,buf_out_);
 
         
-        cl::NDRange glob(b_,align_up(htiles*wtiles,8),align_up(out_c_,8));
+        cl::NDRange glob(b_,align_up(htiles_*wtiles_,8),align_up(out_c_,8));
         cl::NDRange loc(1,8,8);
         queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,nullptr);
 
@@ -169,6 +169,8 @@ public:
 	virtual void copy_back() {
         	d2h(buf_out_,host_out_,b_*out_w_*out_h_*out_c_*sizeof(float));
 	}
+private:
+    int htiles_,wtiles_;
 };
 
 
