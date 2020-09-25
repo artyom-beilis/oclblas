@@ -6,12 +6,15 @@ find_library(OCL_LIB OpenCL)
 
 find_path(BOOST_INC boost/shared_ptr.hpp) 
 
-### My build always
-#if(OCL_PATH AND OCL_LIB)
-#	add_executable(test_gemm_my test.cpp sgemm_cpu.cpp sgemm_my.cpp)
-#	target_include_directories(test_gemm_my PUBLIC  ${OCL_PATH})
-#	target_link_libraries(test_gemm_my ${OCL_LIB} openblas)
-#endif()
+# My build always
+if(OCL_PATH AND OCL_LIB)
+	add_executable(test_conv_winograd test_conv.cpp conv_ref.cpp conv_winograd.cpp)
+    target_compile_definitions(test_conv_winograd PUBLIC "-DMYKERNEL_PATH=\"${CMAKE_CURRENT_SOURCE_DIR}/\"")
+	target_include_directories(test_conv_winograd PUBLIC  ${OCL_PATH})
+	target_link_libraries(test_conv_winograd ${OCL_LIB} openblas)
+endif()
+
+
 
 if(CUDA_PATH AND CUDNN_PATH)
 	find_path(CUDA_HDR cuda_runtime.h HINTS ${CUDA_PATH}/include)
