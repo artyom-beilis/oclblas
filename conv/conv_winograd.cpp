@@ -21,6 +21,9 @@ public:
 	cl::Buffer buf_in_,buf_out_,buf_kern_;
     cl::Buffer buf_tiled_in_,buf_conv_kern_;
 
+    std::vector<double> total_times_;
+    int counts_;
+
 	size_t ws_size_;
 	float *host_out_;
     
@@ -36,7 +39,18 @@ public:
     }
     void build()
     {
-        std::string src = get_kernel();
+        twg_ = 8;
+        kwg_ = 8;
+        if(getenv("KWG"))
+            kwg_ = atoi(getenv("KWG"));
+        if(getenv("TWG"))
+            twg_ = atoi(getenv("TWG"));
+
+        std::string src;
+        src = "#define TILES_IN_WG   " + std::to_string(twg_) + "\n"
+              "#define KERNELS_IN_WG " + std::to_string(kwg_) + "\n";
+        std::cerr << "KWG=" << kwg_ << " TWG=" << twg_ << std::endl;
+        src += get_kernel();
         cl::Program::Sources sources(1,std::make_pair(src.c_str(),src.size()));
         prog_ = std::move(cl::Program(context_,sources));
         int rc;
@@ -53,7 +67,7 @@ public:
         tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
         win_conv_ = std::move(cl::Kernel(prog_,"winconv_3x3"));
     }
-	
+    	
 	conv_winograd(int platform,int device)  
 	{
 		std::vector<cl::Platform> platforms;
@@ -64,9 +78,26 @@ public:
 		device_ = devices[device];
 		auto device_as_vector = std::vector<cl::Device>{device_};
 		context_ = cl::Context(device_as_vector);
-		queue_ = cl::CommandQueue(context_, device_);
+		queue_ = cl::CommandQueue(context_, device_,CL_QUEUE_PROFILING_ENABLE);
         build();
 	}
+
+    ~conv_winograd()
+    {
+        if(counts_ != 0) {
+            printf("Times ms\n");
+            double sum = 0;
+            for(unsigned i=0;i<total_times_.size();i++) {
+                printf("%10.3f,",total_times_[i] / counts_);
+                sum+=total_times_[i];
+            }
+            printf("\nRalative %%\n");
+            for(unsigned i=0;i<total_times_.size();i++) {
+                printf("%5.2f%%,",total_times_[i]/sum*100.0);
+            }
+            printf("\n");
+        }
+    }
 
 	
 	cl::Buffer dalloc(size_t n)
@@ -117,6 +148,7 @@ public:
         return (v+gran-1)/gran*gran;
     }
 	virtual void calc() {
+        std::vector<cl::Event> ev(3);
 		float alpha=1.0f;
 		float beta=0.0f;
         //buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));
@@ -138,12 +170,12 @@ public:
         queue_.enqueueNDRangeKernel(tiles_conv_,
                                         cl::NullRange,
                                         cl::NDRange(b_*c_,htiles_,wtiles_),
-                                        cl::NullRange,nullptr,nullptr);
+                                        cl::NullRange,nullptr,&ev[0]);
         ind=0;
         kernel_conv_.setArg(ind++,c_*out_c_);
         kernel_conv_.setArg(ind++,buf_kern_);
         kernel_conv_.setArg(ind++,buf_conv_kern_);
-        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,cl::NDRange(c_*out_c_),cl::NullRange,nullptr,nullptr);
+        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,cl::NDRange(c_*out_c_),cl::NullRange,nullptr,&ev[1]);
         
         ind=0;
         win_conv_.setArg(ind++,b_);
@@ -158,9 +190,22 @@ public:
         win_conv_.setArg(ind++,buf_out_);
 
         
-        cl::NDRange glob(b_,align_up(htiles_*wtiles_,8),align_up(out_c_,8));
-        cl::NDRange loc(1,8,8);
-        queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,nullptr);
+        cl::NDRange glob(b_,align_up(htiles_*wtiles_,twg_),align_up(out_c_,kwg_));
+        cl::NDRange loc(1,twg_,kwg_);
+        queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,&ev[2]);
+        if(getenv("PROF")) {
+            const int N = ev.size();
+            total_times_.resize(N);
+            cl::Event::waitForEvents(ev);
+            cl_ulong start=0,stop=0;
+
+            for(int i=0;i<sizeof(ev)/sizeof(ev[0]);i++)  {
+                clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_START,sizeof(start),&start,0);
+                clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_END,sizeof(stop),&stop,0);
+                total_times_[i] += (stop - start) * 1e-3;
+            }
+            counts_++;
+        }
 
 	}
 	virtual void sync() {
@@ -171,6 +216,7 @@ public:
 	}
 private:
     int htiles_,wtiles_;
+    int twg_,kwg_;
 };
 
 
