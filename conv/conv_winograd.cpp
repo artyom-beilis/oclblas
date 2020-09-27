@@ -37,20 +37,38 @@ public:
         ss << tmp.rdbuf();
         return ss.str();
     }
+    
+    void make_param(int &v,char const *env,char const *name,std::string &s,std::string &log)
+    {
+        if(getenv(env)!=0) 
+            v=atoi(getenv(env));
+        s+="#define ";
+        s+=name;
+        s+=" ";
+        s+=std::to_string(v);
+        s+="\n";
+        log+=name + ("=" + (std::to_string(v) + " "));
+    }
+
     void build()
     {
-        twg_ = 8;
-        kwg_ = 8;
-        if(getenv("KWG"))
-            kwg_ = atoi(getenv("KWG"));
-        if(getenv("TWG"))
-            twg_ = atoi(getenv("TWG"));
-
-        std::string src;
-        src = "#define TILES_IN_WG   " + std::to_string(twg_) + "\n"
-              "#define KERNELS_IN_WG " + std::to_string(kwg_) + "\n";
-        std::cerr << "KWG=" << kwg_ << " TWG=" << twg_ << std::endl;
-        src += get_kernel();
+        std::string header,log;
+        tiles_in_wg_ = 16;
+        kerns_in_wg_ = 16;
+        wgdim_t_ = 8;
+        wgdim_k_ = 8;
+        so4_ = 0;
+        make_param(tiles_in_wg_,"T_INWG","TILES_IN_WG",header,log);
+        make_param(kerns_in_wg_,"K_INWG","KERNELS_IN_WG",header,log);
+        make_param(wgdim_t_,"WGDIM_T","WG_DIM_TILES",header,log);
+        make_param(wgdim_k_,"WGDIM_K","WG_DIM_KERNELS",header,log);
+        make_param(so4_,"SO4","SUM_OF_4",header,log);
+        block_t_ = tiles_in_wg_/wgdim_t_;
+        block_k_ = kerns_in_wg_/wgdim_k_;
+        std::string src = header + get_kernel();
+        std::cerr << log << std::endl;
+        std::ofstream tmp("/tmp/out.cl");
+        tmp << src;
         cl::Program::Sources sources(1,std::make_pair(src.c_str(),src.size()));
         prog_ = std::move(cl::Program(context_,sources));
         int rc;
@@ -189,9 +207,15 @@ public:
         win_conv_.setArg(ind++,buf_conv_kern_);
         win_conv_.setArg(ind++,buf_out_);
 
-        
-        cl::NDRange glob(b_,align_up(htiles_*wtiles_,twg_),align_up(out_c_,kwg_));
-        cl::NDRange loc(1,twg_,kwg_);
+        #ifndef USE_1_OUTPUT_PER_THREAD
+        int tile_dim = (htiles_*wtiles_ + block_t_ - 1) / block_t_;
+        int kern_dim = (out_c_ + block_k_ - 1) / block_k_;
+        cl::NDRange loc(1,wgdim_t_,wgdim_k_);
+        cl::NDRange glob(b_,align_up(tile_dim,wgdim_t_),align_up(kern_dim,wgdim_k_));
+        #else
+        cl::NDRange glob(b_,align_up(htiles_*wtiles_),align_up(out_c_,kerns_in_wg_));
+        cl::NDRange loc(1,tiles_in_wg_,kerns_in_wg_);
+        #endif
         queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,&ev[2]);
         if(getenv("PROF")) {
             const int N = ev.size();
@@ -216,7 +240,7 @@ public:
 	}
 private:
     int htiles_,wtiles_;
-    int twg_,kwg_;
+    int tiles_in_wg_,kerns_in_wg_,wgdim_t_,wgdim_k_,so4_,block_k_,block_t_;
 };
 
 
