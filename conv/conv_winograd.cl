@@ -153,6 +153,7 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
 #define KERNELS_IN_WG 8
 #endif
 
+#define SUM_OF_4
 
 __kernel 
 __attribute__((reqd_work_group_size(1,TILES_IN_WG, KERNELS_IN_WG)))
@@ -164,7 +165,11 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     // +1 to prevent bank collisions
     __local float local_tiles[TILES_IN_WG][16+1]; 
     __local float local_kernels[KERNELS_IN_WG][16+1];
-    float s[16]={0.0f};
+#ifdef SUM_OF_4
+    float4 res=(float4)(0.0,0.0,0.0,0.0);
+#else
+    float16 s=(float16)(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0);
+#endif
 
     int batch = get_global_id(0);
 
@@ -210,10 +215,11 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 
 
         barrier(CLK_LOCAL_MEM_FENCE);
-        #pragma unroll
-        for(int i=0;i<16;i++) {
-            s[i] = mad(local_tiles[tile_wg_id][i],local_kernels[kernel_wg_id][i],s[i]);
-        }
+#ifdef SUM_OF_4
+        res += tile4x4_after_wingorad_to_2x2(vload16(0,local_tiles[tile_wg_id])*vload16(0,local_kernels[kernel_wg_id]));
+#else   
+        s = mad(vload16(0,local_tiles[tile_wg_id]),vload16(0,local_kernels[kernel_wg_id]),s);         
+#endif
 
         barrier(CLK_LOCAL_MEM_FENCE);
     }
@@ -223,9 +229,9 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 
     __global float *gres = result;
     
-    float16 sum16={s[0],s[1],s[2],s[3], s[4],s[5],s[6],s[7], s[8],s[9],s[10],s[11], s[12],s[13],s[14],s[15] };
-
-    float4 res = tile4x4_after_wingorad_to_2x2(sum16);
+#ifndef SUM_OF_4
+    float4 res = tile4x4_after_wingorad_to_2x2(s);
+#endif
     int offset = batch*oC*oH*oW + oH*oW*kernel_id+ row * oW + col;
     result += offset;
 
