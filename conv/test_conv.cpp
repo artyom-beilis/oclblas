@@ -28,7 +28,7 @@ bool compare_arrays(std::vector<float> const &a,std::vector<float> const &b)
 	}
 	for(unsigned i=0;i<a.size();i++) {
 		float diff = fabs(a[i]-b[i]);
-		if(diff > 1e-3) {
+		if(diff > 1e-3 || isnan(a[i])) {
 			std::cerr << "error at " << i << " " << a[i] << " " << b[i] << " diff=" << diff << std::endl;
 		}
 	}

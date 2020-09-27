@@ -247,3 +247,128 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         }
     }
 }
+
+#if 0
+__kernel 
+__attribute__((reqd_work_group_size(1,TILES_IN_WG, KERNELS_IN_WG)))
+void winconv_3x3_permute(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+                          __global float const *tiles,
+                          __global float const *kernels,
+                          __global float *result)
+{
+    float s[16]={0.0f};
+
+    int batch = get_global_id(0);
+
+    int tile_row_col = get_global_id(1);
+    int tile_wg_id   = get_local_id(1);
+    int tiles_no = tilesH*tilesW;
+    int row = tile_row_col / tilesW * 2;
+    int col = tile_row_col % tilesW * 2;
+
+    int kernel_id = get_global_id(2);
+    int kernel_wg_id = get_local_id(2);
+    
+    int tiles2d = tilesH * tilesW;
+    __global float const * tile_base    = tiles   + 16*(batch * tiles2d * C + tile_row_col);
+    __global float const * kernels_base = kernels + 16*(C * kernel_id);
+
+    #pragma unroll 4
+    for(int channel=0;channel<C;channel++,tile_base += tiles2d*16,kernels_base +=16) {
+        const int kstep = 16 / KERNELS_IN_WG;
+        const int tstep = 16 / TILES_IN_WG;
+        float my_loaded_tile[kstep];
+        float my_loaded_kern[tstep];
+
+        if(tile_row_col < tiles2d) {
+            #pragma unroll
+            for(int i=0;i<kstep;i++)
+                my_loaded_tile[i] = tile_base[kernel_wg_id*kstep + i];
+        }
+        else {
+            #pragma unroll
+            for(int i=0;i<kstep;i++)
+                my_loaded_tile[i] = 0.0f;
+        }
+        if(kernel_id < oC) {
+            #pragma unroll
+            for(int i=0;i<tstep;i++)
+                my_loaded_kern[i] = kernels_base[tile_wg_id*tstep+i];
+        }
+        else {
+            #pragma unroll
+            for(int i=0;i<tstep;i++)
+                my_loaded_kern[i] = 0.0f;
+        }
+
+#if KERNELS_IN_WG == TILES_IN_WG
+        int my_tile_in_perm = tile_wg_id * 4;
+        int my_kernel_index = kernel_wg_id * 8 * 4;
+        #pragma unroll
+        for(int i=0;i<KERNELS_IN_WG;i++,my_tile_in_perm+=KERNELS_IN_WG*4,my_kernel_index+=4) {
+            #pragma unroll
+            for(int j=0;j<kstep;j++) {
+                float t = as_float(__builtin_amdgcn_ds_bpermute(my_tile_in_perm, as_int(my_loaded_tile[j])));
+                float k = as_float(__builtin_amdgcn_ds_bpermute(my_kernel_index, as_int(my_loaded_kern[j])));
+                s[i*kstep+j] += t*k;
+            }
+        }
+#else
+        float my_tile[16];
+        float my_kern[16];
+        int my_tile_in_perm = tile_wg_id * 4;
+        #pragma unroll
+        for(int i=0;i<KERNELS_IN_WG;i++,my_tile_in_perm+=KERNELS_IN_WG*4) {
+            #pragma unroll
+            for(int j=0;j<kstep;j++) {
+                my_tile[i*kstep+j] = as_float(__builtin_amdgcn_ds_bpermute(my_tile_in_perm, as_int(my_loaded_tile[j])));
+            }
+        }
+
+        int my_kernel_index = kernel_wg_id * 8 * 4;
+        #pragma unroll
+        for(int i=0;i<TILES_IN_WG;i++,my_kernel_index+=4) {
+            #pragma unroll
+            for(int j=0;j<tstep;j++) {
+                my_kern[i*tstep+j] = as_float(__builtin_amdgcn_ds_bpermute( my_kernel_index, as_int(my_loaded_kern[j])));
+            }
+        }
+
+        #pragma unroll
+        for(int i=0;i<16;i++) {
+            s[i] = mad(my_tile[i],my_kern[i],s[i]);
+        }
+#endif
+    }
+
+    if(kernel_id >= oC)
+        return;
+
+    __global float *gres = result;
+    
+    float16 sum16={s[0],s[1],s[2],s[3], s[4],s[5],s[6],s[7], s[8],s[9],s[10],s[11], s[12],s[13],s[14],s[15] };
+
+    float4 res = tile4x4_after_wingorad_to_2x2(sum16);
+    int offset = batch*oC*oH*oW + oH*oW*kernel_id+ row * oW + col;
+    result += offset;
+
+    if(row < oH) {
+        if(col < oW) {
+            result[0] = res.s0;
+        }
+        if(col+1 < oW) {
+            result[1] = res.s1;
+        }
+    }
+    result += oW;
+    if(row + 1 < oH) {
+        if(col < oW) {
+            result[0] = res.s2;
+        }
+        if(col+1 < oW) {
+            result[1] = res.s3;
+        }
+    }
+}
+
+#endif
