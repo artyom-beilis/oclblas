@@ -1,3 +1,4 @@
+#define __CL_ENABLE_EXCEPTIONS
 #include "conv_base.h"
 #include <stdexcept>
 #include <iostream>
@@ -190,10 +191,11 @@ public:
                                         cl::NDRange(b_*c_,htiles_,wtiles_),
                                         cl::NullRange,nullptr,&ev[0]);
         ind=0;
-        kernel_conv_.setArg(ind++,c_*out_c_);
+        kernel_conv_.setArg(ind++,out_c_);
+        kernel_conv_.setArg(ind++,c_);
         kernel_conv_.setArg(ind++,buf_kern_);
         kernel_conv_.setArg(ind++,buf_conv_kern_);
-        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,cl::NDRange(c_*out_c_),cl::NullRange,nullptr,&ev[1]);
+        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,cl::NDRange(out_c_,c_),cl::NullRange,nullptr,&ev[1]);
         
         ind=0;
         win_conv_.setArg(ind++,b_);
@@ -226,7 +228,7 @@ public:
             for(int i=0;i<sizeof(ev)/sizeof(ev[0]);i++)  {
                 clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_START,sizeof(start),&start,0);
                 clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_END,sizeof(stop),&stop,0);
-                total_times_[i] += (stop - start) * 1e-3;
+                total_times_[i] += (stop - start) * 1e-6;
             }
             counts_++;
         }

@@ -1,3 +1,6 @@
+
+#define REV_KERNELS 1
+
 float16 load_4x4_tile_and_transform(__global const float * restrict channel,int stride, 
                                                 int H, int W,
                                                 int row, int col)
@@ -122,12 +125,18 @@ float4 tile4x4_after_wingorad_to_2x2(float16 tile)
 }
 
 
-__kernel void winconv_calc_gkgt_3x3(int N,__global const float * restrict gk3,__global float16 *k4)
+__kernel void winconv_calc_gkgt_3x3(int N,int C,__global const float * restrict gk3,__global float16 *k4)
 {
-    int kid = get_global_id(0);
-    if(kid >= N)
+    int n = get_global_id(0);
+    int c = get_global_id(1);
+    if(n >= N || c>= C)
         return;
-    k4[kid] = load_3x3_kernel_and_transform(gk3 + kid*9);
+    float16 kern = load_3x3_kernel_and_transform(gk3 + (C * n + c) * 9);
+#if REV_KERNELS == 1
+    k4[N * c + n] = kern;
+#else
+    k4[C * n + c] = kern;
+#endif
 }
 
 __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
@@ -273,10 +282,17 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 
     int tiles2d = tilesH * tilesW;
     __global float const * tile_base    =  tiles   + 16*(batch * tiles2d * C + tile_wg_id);
+#if REV_KERNELS == 1
+    __global float const * kernels_base = kernels + 16*kernel_wg_id;
+    const int kern_step = C * 16;
+    const kernels_stride = 16;
+#else
     __global float const * kernels_base = kernels + 16*(C * kernel_wg_id);
-    int kernels_stride = 16 * C;
+    const int kern_step = 16;
+    const int kernels_stride = 16 * C;
+#endif
 
-    for(int channel=0;channel<C;channel++,tile_base += tiles2d*16,kernels_base +=16) {
+    for(int channel=0;channel<C;channel++,tile_base += tiles2d*16,kernels_base +=kern_step) {
 
         load_tiles(local_tiles,tile_base,tile_wg_id,tiles_no);
         load_kernels(local_kernels,kernels_base,kernels_stride,kernel_wg_id,oC);
