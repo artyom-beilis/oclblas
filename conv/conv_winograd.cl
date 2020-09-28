@@ -181,6 +181,8 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
 
 #define THREADS (WG_DIM_TILES * WG_DIM_KERNELS)
 
+#if 0
+
 #define TILE_ITEMS_PER_THREAD (TILES_IN_WG * 16 / THREADS)
 #define KERNEL_ITEMS_PER_THREAD (KERNELS_IN_WG * 16 / THREADS)
 
@@ -249,8 +251,6 @@ void load_kernels(__local float local_kernels[KERNELS_IN_WG][16+LOCAL_MEM_PAD],_
 }
 
 
-
-#if 1
 __kernel 
 __attribute__((reqd_work_group_size(1,WG_DIM_TILES, WG_DIM_KERNELS)))
 void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
@@ -368,6 +368,119 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     }
 
 }
+#elif 1
+__kernel 
+__attribute__((reqd_work_group_size(1,WG_DIM_TILES, WG_DIM_KERNELS)))
+void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+                          __global float const *tiles,
+                          __global float const *kernels,
+                          __global float *result)
+{
+    // +1 to prevent bank collisions
+#if SUM_OF_4==0
+    float16 s[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={};
+#else
+    float4  res[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={};
+#endif
+
+    int batch = get_global_id(0);
+
+    int tile_row_col = get_global_id(1) * TILES_IN_BLOCK;
+    int tile_wg_id   = get_group_id(1) * TILES_IN_WG;
+    int tiles_no = tilesH*tilesW;
+    int tile_row = tile_row_col / tilesW;
+    int tile_col = tile_row_col % tilesW;
+    int tile_local_base = get_local_id(1) * TILES_IN_BLOCK;
+
+    int kernel_id = get_global_id(2) * KERNELS_IN_BLOCK;
+    int kernel_wg_id = get_group_id(2) * KERNELS_IN_WG;
+    int kernel_local_base = get_local_id(2) * KERNELS_IN_BLOCK;
+
+    int tiles2d = tilesH * tilesW;
+    __global float const * tile_base    =  tiles   + 16*(batch * tiles2d * C + tile_wg_id);
+#if REV_KERNELS == 1
+    __global float const * kernels_base = kernels + 16*kernel_wg_id;
+    const int kern_step = C * 16;
+    const int kernels_stride = 16;
+#else
+    __global float const * kernels_base = kernels + 16*(C * kernel_wg_id);
+    const int kern_step = 16;
+    const int kernels_stride = 16 * C;
+#endif
+
+    const float16 zero = (float16)(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0);
+
+    for(int channel=0;channel<C;channel++,tile_base += tiles2d*16,kernels_base +=kern_step) {
+
+        float16 krs[KERNELS_IN_BLOCK];
+        #pragma unroll
+        for(int dk=0;dk<KERNELS_IN_BLOCK;dk++)
+            krs[dk] = kernel_id + dk < oC ? vload16(0,kernels_base + kernels_stride * (kernel_local_base + dk)) : zero;
+
+        #pragma unroll
+        for(int dt=0;dt<TILES_IN_BLOCK;dt++) {
+            float16 tv = tile_row_col + dt < tiles2d ? vload16(0,tile_base + 16*(tile_local_base + dt)) : zero;
+            #pragma unroll
+            for(int dk=0;dk<KERNELS_IN_BLOCK;dk++) {
+                #if SUM_OF_4 == 1
+                res[dt][dk] += tile4x4_after_wingorad_to_2x2(krs[dk]*tv);
+                #else   
+                s[dt][dk] = mad(tv,krs[dk],s[dt][dk]);         
+                #endif
+            }
+        }
+
+    }
+
+    int oHW = oH*oW;
+    int off0= batch*oC*oHW + oHW*kernel_id;
+    #pragma unroll
+    for(int dk=0;dk<KERNELS_IN_BLOCK;dk++,off0 += oHW) {
+        int kid = kernel_id + dk;
+        if(kid >= oC)
+            continue;
+        int crow = tile_row;
+        int ccol = tile_col;
+        #pragma unroll
+        for(int dt=0;dt<TILES_IN_BLOCK;dt++) {
+            int tid = tile_row_col + dt;
+            #if SUM_OF_4 == 0
+            volatile float4 tile_res = tile4x4_after_wingorad_to_2x2(s[dt][dk]);
+            #else
+            float4 tile_res = res[dt][dk];
+            #endif
+            int offset = off0+ 2 * (crow * oW + ccol);
+            __global float *output = result + offset;
+            int row = crow*2;
+            int col = ccol*2;
+            if(row < oH) {
+                if(col < oW) {
+                    output[0] = tile_res.s0;
+                }
+                if(col+1 < oW) {
+                    output[1] = tile_res.s1;
+                }
+            }
+            output += oW;
+            if(row + 1 < oH) {
+                if(col < oW) {
+                    output[0] = tile_res.s2;
+                }
+                if(col+1 < oW) {
+                    output[1] = tile_res.s3;
+                }
+            }
+            // update for next block
+            ccol++;
+            if(ccol >= tilesW) {
+                crow ++;
+                ccol = 0;
+            }
+        }
+    }
+
+}
+
 
 #else 
 __kernel 

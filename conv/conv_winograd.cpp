@@ -1,4 +1,4 @@
-#define __CL_ENABLE_EXCEPTIONS
+//#define __CL_ENABLE_EXCEPTIONS
 #include "conv_base.h"
 #include <stdexcept>
 #include <iostream>
