@@ -146,6 +146,8 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
     tiles[bc * w_tiles * h_tiles + r*w_tiles + c] = tile;
 }
 
+#define LOCAL_MEM_PAD 1
+
 #ifndef WG_DIM_TILES
 #define WG_DIM_TILES 8
 #endif
@@ -173,9 +175,9 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
 #define TILE_ITEMS_PER_THREAD (TILES_IN_WG * 16 / THREADS)
 #define KERNEL_ITEMS_PER_THREAD (KERNELS_IN_WG * 16 / THREADS)
 
-void load_tiles(__local float local_tiles[TILES_IN_WG][16+1],__global float const *tiles_base,int wg_tile_id,int total_tiles)
+void load_tiles(__local float local_tiles[TILES_IN_WG][16 + LOCAL_MEM_PAD],__global float const *tiles_base,int wg_tile_id,int total_tiles)
 {
-    int local_wg_id = get_local_id(1) * WG_DIM_KERNELS + get_local_id(2);
+    int local_wg_id = get_local_id(1) + WG_DIM_TILES * get_local_id(2);
     int local_tile_id     = local_wg_id / (16 / TILE_ITEMS_PER_THREAD );
     int local_tile_offset = local_wg_id % (16 / TILE_ITEMS_PER_THREAD ) * TILE_ITEMS_PER_THREAD;
 
@@ -205,25 +207,26 @@ void load_tiles(__local float local_tiles[TILES_IN_WG][16+1],__global float cons
     }
 }
 
-void load_kernels(__local float local_kernels[KERNELS_IN_WG][16+1],__global float const *kernels_base,int stride_floats,int wg_kernel_id,int total_kernels)
+void load_kernels(__local float local_kernels[KERNELS_IN_WG][16+LOCAL_MEM_PAD],__global float const *kernels_base,int stride_floats,int wg_kernel_id,int total_kernels)
 {
-    int local_wg_id = get_local_id(1) * WG_DIM_KERNELS + get_local_id(2);
+    int local_wg_id = get_local_id(1) + WG_DIM_TILES * get_local_id(2);
     int local_kern_id     = local_wg_id / (16 / KERNEL_ITEMS_PER_THREAD );
     int local_kern_offset = local_wg_id % (16 / KERNEL_ITEMS_PER_THREAD ) * KERNEL_ITEMS_PER_THREAD;
 
     __global float const *ldptr = kernels_base + local_kern_id * stride_floats + local_kern_offset;
     __local  float *stptr = local_kernels[local_kern_id] + local_kern_offset;
 
+
     if(local_kern_id + wg_kernel_id < total_kernels) {
-    #if TILE_ITEMS_PER_THREAD == 16
+    #if KERNEL_ITEMS_PER_THREAD == 16
         vstore16(vload16(0,ldptr),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 8
+    #elif KERNEL_ITEMS_PER_THREAD == 8
         vstore8(vload8(0,ldptr),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 4
+    #elif KERNEL_ITEMS_PER_THREAD == 4
         vstore4(vload4(0,ldptr),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 2
+    #elif KERNEL_ITEMS_PER_THREAD == 2
         vstore2(vload2(0,ldptr),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 1
+    #elif KERNEL_ITEMS_PER_THREAD == 1
         *stptr = *ldptr;
     #else
         #error "Unsupported configuration"
@@ -247,12 +250,12 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
                           __global float *result)
 {
     // +1 to prevent bank collisions
-    __local float local_tiles[TILES_IN_WG][16+1]; 
-    __local float local_kernels[KERNELS_IN_WG][16+1];
+    __local float local_tiles[TILES_IN_WG][16 + LOCAL_MEM_PAD]; 
+    __local float local_kernels[KERNELS_IN_WG][16 + LOCAL_MEM_PAD];
 #if SUM_OF_4==0
-    float16 s[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={ (float16)(0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0) };
+    float16 s[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={};
 #else
-    float4  res[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={ (float4)(0.0,0.0,0.0,0.0) };
+    float4  res[TILES_IN_BLOCK][KERNELS_IN_BLOCK]={};
 #endif
 
     int batch = get_global_id(0);
@@ -277,11 +280,12 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 
         load_tiles(local_tiles,tile_base,tile_wg_id,tiles_no);
         load_kernels(local_kernels,kernels_base,kernels_stride,kernel_wg_id,oC);
+        
         barrier(CLK_LOCAL_MEM_FENCE);
 
         float16 krs[KERNELS_IN_BLOCK];
         #pragma unroll
-        for(int dk=0;dk<KERNELS_IN_BLOCK;dk++) 
+        for(int dk=0;dk<KERNELS_IN_BLOCK;dk++)
             krs[dk] = vload16(0,local_kernels[kernel_local_base + dk]);
 
         #pragma unroll
@@ -300,8 +304,10 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
+    int oHW = oH*oW;
+    int off0= batch*oC*oHW + oHW*kernel_id;
     #pragma unroll
-    for(int dk=0;dk<KERNELS_IN_BLOCK;dk++) {
+    for(int dk=0;dk<KERNELS_IN_BLOCK;dk++,off0 += oHW) {
         int kid = kernel_id + dk;
         if(kid >= oC)
             continue;
@@ -311,11 +317,11 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         for(int dt=0;dt<TILES_IN_BLOCK;dt++) {
             int tid = tile_row_col + dt;
             #if SUM_OF_4 == 0
-            float4 tile_res = tile4x4_after_wingorad_to_2x2(s[dt][dk]);
+            volatile float4 tile_res = tile4x4_after_wingorad_to_2x2(s[dt][dk]);
             #else
             float4 tile_res = res[dt][dk];
             #endif
-            int offset = batch*oC*oH*oW + oH*oW*kid+ crow * 2 * oW + ccol * 2;
+            int offset = off0+ 2 * (crow * oW + ccol);
             __global float *output = result + offset;
             int row = crow*2;
             int col = ccol*2;
