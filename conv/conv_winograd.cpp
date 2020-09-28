@@ -85,6 +85,18 @@ public:
         kernel_conv_ = std::move(cl::Kernel(prog_,"winconv_calc_gkgt_3x3"));
         tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
         win_conv_ = std::move(cl::Kernel(prog_,"winconv_3x3"));
+        
+        /// Query binary (PTX file) size
+        size_t bin_sz;
+        rc = clGetProgramInfo(prog_(), CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &bin_sz, NULL);
+
+        // Read binary (PTX file) to memory buffer
+        std::vector<unsigned char> bin(bin_sz+1);
+        unsigned char *ptr = &bin[0];
+        rc = clGetProgramInfo(prog_(), CL_PROGRAM_BINARIES, sizeof(unsigned char *), &ptr, NULL);
+        std::ofstream ptx("conv.ptx");
+        ptx.write((char *)(&bin[0]),bin_sz);
+        ptx.close();
     }
     	
 	conv_winograd(int platform,int device)  
