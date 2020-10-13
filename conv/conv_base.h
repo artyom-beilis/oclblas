@@ -34,6 +34,7 @@ public:
 	{
 		return std::array<int,4>{b_,out_c_,out_h_,out_w_};
 	}
+    virtual void warmup_done() {}
 	virtual void set_kernel(float const *k) = 0;
 	virtual void set_input(float const *inp) = 0;
 	virtual void set_output(float *outp) = 0;

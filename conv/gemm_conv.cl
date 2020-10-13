@@ -1,24 +1,20 @@
 // vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
 #ifndef TILE_SIZE_M
-#define TILE_SIZE_M 64
+#define TILE_SIZE_M 32
 #endif
 #ifndef TILE_SIZE_N
-#define TILE_SIZE_N 64
+#define TILE_SIZE_N 32
 #endif
 #ifndef BLOCK_SIZE_N
-#define BLOCK_SIZE_N 8
+#define BLOCK_SIZE_N 4
 #endif
 #ifndef BLOCK_SIZE_M
-#define BLOCK_SIZE_M 8
+#define BLOCK_SIZE_M 4
 #endif
 
 #ifndef TILE_SIZE_K
-#define TILE_SIZE_K 16
+#define TILE_SIZE_K 8
 #endif 
-
-#ifndef TILE_OFFSET
-#define TILE_OFFSET 1
-#endif
 
 #define BLOCK_SIZE_NY (BLOCK_SIZE_N*BLOCK_SIZE_M)
 #define BLOCKS_IN_TILE_N (TILE_SIZE_N / BLOCK_SIZE_N)
@@ -64,6 +60,9 @@ inline float get_img_at_r_c(__global const float * restrict B,int ipos,int ppos,
 
 //#define SIM
 
+#ifndef TILE_OFFSET
+#define TILE_OFFSET 0
+#endif
 
 #define lA(x,y) a_tile[(x)][(y) / BLOCK_SIZE_M][(y) % BLOCK_SIZE_M]
 #define lB(x,y) b_tile[(x)][(y) / BLOCK_SIZE_N][(y) % BLOCK_SIZE_N]
@@ -104,24 +103,7 @@ void    conv_sgemm(    int M,int N,int K,
     int k=0;
     for(k=0;k<K;k+=TILE_SIZE_K) {
 
-        #ifdef SIM
-        if(k==0) {
-            #pragma unroll
-            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
-                int tile_kdir = read_pos / TILE_SIZE_M;
-                int tile_tdir = read_pos % TILE_SIZE_M;
-                lA(tile_kdir,tile_tdir) = 1.3f;
-            }
-            #pragma unroll
-            for(int i=0,read_pos = local_tile_id;i<load_step;i++,read_pos+=WG_SIZE) {
-                int tile_kdir = read_pos / TILE_SIZE_N;
-                int tile_tdir = read_pos % TILE_SIZE_N;
-                lB(tile_kdir,tile_tdir) = 2.3f;
-            }
-            barrier(CLK_LOCAL_MEM_FENCE);
-        }
-        //#elif 0
-        #elif (TILE_SIZE_M == 32  && TILE_SIZE_N == 32  && BLOCK_SIZE_M==4 && BLOCK_SIZE_N == 4 && (TILE_SIZE_K==16 || TILE_SIZE_K==32 || TILE_SIZE_K==64)) \
+        #if (TILE_SIZE_M == 32  && TILE_SIZE_N == 32  && BLOCK_SIZE_M==4 && BLOCK_SIZE_N == 4 && (TILE_SIZE_K==16 || TILE_SIZE_K==32 || TILE_SIZE_K==64)) \
           ||  (TILE_SIZE_M == 64  && TILE_SIZE_N == 64  && BLOCK_SIZE_M==8 && BLOCK_SIZE_N == 8 && (TILE_SIZE_K==16 || TILE_SIZE_K==32 || TILE_SIZE_K==64)) \
           ||  (TILE_SIZE_M == 128 && TILE_SIZE_N == 128 && BLOCK_SIZE_M==8 && BLOCK_SIZE_N == 8 && (TILE_SIZE_K==16 || TILE_SIZE_K==32 || TILE_SIZE_K==64))
         {

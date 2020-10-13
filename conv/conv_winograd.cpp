@@ -38,6 +38,12 @@ public:
         ss << tmp.rdbuf();
         return ss.str();
     }
+
+    virtual void warmup_done()
+    {
+        total_times_.assign(0,total_times_.size());
+        counts_ = 0;
+    }
     
     void make_param(int &v,char const *env,char const *name,std::string &s,std::string &log)
     {
@@ -74,7 +80,11 @@ public:
         prog_ = std::move(cl::Program(context_,sources));
         int rc;
         std::vector<cl::Device> devices(1,device_);
-        if((rc=prog_.build(devices))!=0) {
+        char const *extra = "";
+        if(getenv("SAVE_TEMPS")) {
+            extra = "-save-temps=./ ";
+        }
+        if((rc=prog_.build(devices,extra))!=0) {
             size_t len=0;
             static char buffer[16384*32];
             clGetProgramBuildInfo(prog_(), devices[0](), CL_PROGRAM_BUILD_LOG, sizeof(buffer)-1, buffer, &len);
@@ -83,7 +93,8 @@ public:
             throw std::runtime_error("Failed to build");
         }
         kernel_conv_ = std::move(cl::Kernel(prog_,"winconv_calc_gkgt_3x3"));
-        tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
+        tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4_x4"));
+        //tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
         win_conv_ = std::move(cl::Kernel(prog_,"winconv_3x3"));
         
         /// Query binary (PTX file) size
@@ -198,16 +209,22 @@ public:
         tiles_conv_.setArg(ind++,buf_in_);
         tiles_conv_.setArg(ind++,buf_tiled_in_);
 
+        cl::NDRange tg = cl::NDRange(b_*c_ * 4,align_up(htiles_,8),align_up(wtiles_,8));
+        //cl::NDRange tg = cl::NDRange(b_*c_,align_up(htiles_,8),align_up(wtiles_,8));
+        cl::NDRange lg = cl::NDRange(4,8,8);
+
         queue_.enqueueNDRangeKernel(tiles_conv_,
                                         cl::NullRange,
-                                        cl::NDRange(b_*c_,htiles_,wtiles_),
-                                        cl::NullRange,nullptr,&ev[0]);
+                                        tg,
+                                        lg,nullptr,&ev[0]);
         ind=0;
         kernel_conv_.setArg(ind++,out_c_);
         kernel_conv_.setArg(ind++,c_);
         kernel_conv_.setArg(ind++,buf_kern_);
         kernel_conv_.setArg(ind++,buf_conv_kern_);
-        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,cl::NDRange(out_c_,c_),cl::NullRange,nullptr,&ev[1]);
+        cl::NDRange gk(align_up(out_c_,8),align_up(c_,8));
+        cl::NDRange gl(8,8);
+        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,gk,gl,nullptr,&ev[1]);
         
         ind=0;
         win_conv_.setArg(ind++,b_);
