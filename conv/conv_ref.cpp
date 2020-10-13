@@ -66,12 +66,15 @@ public:
 		int kernel_size = kd * kw * kh;
 		int oimg_size = out_w_ * out_h_;
 		for(int ipos = 0;ipos < oimg_size;ipos++) {
+            int img_row0 = (ipos / out_w_) * sh - ph;
+            int img_col0 = (ipos % out_w_) * sw - pw;
 			for(int ppos = 0;ppos < kernel_size;ppos ++) {
 				int depth = ppos / (kw*kh);
-				int dy = ppos % (kw*kh) / kw - ph;
-				int dx = ppos % kw - pw;
-				int img_row = (ipos / out_w_) * sh + dy;
-				int img_col = (ipos % out_w_) * sw + dx;
+				int dy = ppos % (kw*kh) / kw;
+				int dx = ppos % kw;
+
+				int img_row = img_row0 + dy;
+				int img_col = img_col0 + dx;
 				float value = 0.0f;
 				if(0<= img_row && img_row < h_ && 0<=img_col && img_col < w_) {
 					value = img[w_ * h_ * depth + img_row * w_ + img_col];
@@ -85,10 +88,12 @@ public:
 		std::vector<float> tmp_data(im2col_.size());
 		for(int N=0;N<b_;N++) {
 			im2col(im2col_.data(),&in_[c_*h_*w_ * N]);
-			//im2col_inv(tmp_data.data(),&in_[c_*h_*w_ * N]);
-			//if(tmp_data != im2col_) {
-			//	std::cerr << "Failed!!!" << std::endl;
-			//}
+#if 0
+			im2col_inv(tmp_data.data(),&in_[c_*h_*w_ * N]);
+			if(tmp_data != im2col_) {
+				std::cerr << "Failed!!!" << std::endl;
+			}
+#endif            
 			#ifdef DEBUG_CONV
 			printf("im2col\n");
 			{

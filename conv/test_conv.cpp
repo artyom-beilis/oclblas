@@ -30,6 +30,7 @@ bool compare_arrays(std::vector<float> const &a,std::vector<float> const &b)
 		float diff = fabs(a[i]-b[i]);
 		if(diff > 1e-3 || isnan(a[i])) {
 			std::cerr << "error at " << i << " " << a[i] << " " << b[i] << " diff=" << diff << std::endl;
+            return false;
 		}
 	}
 	return true;
@@ -94,7 +95,7 @@ int cmain(int argc,char **argv)
     memset(vC_ref.data(),0,4*vC_ref.size());
 
     for(int i=0;i<int(vA.size());i++) {
-	    vA[i] = int(double(rand()) / RAND_MAX * 3);
+    	vA[i] = int(double(rand()) / RAND_MAX * 3);
     }
     for(int i=0;i<int(vB.size());i++) {
 	    vB[i] = int(double(rand()) / RAND_MAX * 3);
@@ -133,9 +134,10 @@ int cmain(int argc,char **argv)
             conv->sync();
             if(do_check) {
                 conv->copy_back();
-		if(!compare_arrays(vC,vC_ref)) {
-			std::cerr << "FAILED" << std::endl;
-		}
+                conv->warmup_done();
+                if(!compare_arrays(vC,vC_ref)) {
+                    std::cerr << "FAILED" << std::endl;
+                }
             }
             start = std::chrono::system_clock::now(); 
         }
