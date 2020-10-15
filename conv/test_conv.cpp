@@ -130,7 +130,7 @@ int cmain(int argc,char **argv)
 
     auto start = std::chrono::system_clock::now();
     for(int i=-skip;i<iters;i++) {
-        if(i==0) {
+        if(i == -skip + 1) {
             conv->sync();
             if(do_check) {
                 conv->copy_back();
@@ -139,6 +139,9 @@ int cmain(int argc,char **argv)
                     std::cerr << "FAILED" << std::endl;
                 }
             }
+        }
+        if(i==0) {
+            conv->sync();
             start = std::chrono::system_clock::now(); 
         }
         conv->calc();

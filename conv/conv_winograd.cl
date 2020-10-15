@@ -1,8 +1,8 @@
 #define SIM 0
 #define INV_DK 0
-#define REV_KERNELS 1
+#define REV_KERNELS 0
 #define USE_LOCAL_MEM 1
-#define USE_KSHIFT 1 
+#define USE_KSHIFT 1
 
 #define LOCAL_TMEM_PAD 4
 #define LOCAL_TMEM_PAD0 0
@@ -13,8 +13,16 @@
 #define SPLIT_LOAD 1
 
 
+#ifdef __NV_CL_C_VERSION
+#define NVIDIA_PLATFORM 1
+#define INTEL_PLATFORM 0
+#define AMD_PLATFORM 0
+#undef USE_KSHIFT
+#define USE_KSHIFT 0
+#else
 #define INTEL_PLATFORM 0
 #define AMD_PLATFORM 1
+#endif
 
 float16 load_4x4_tile_and_transform(__global const float * restrict channel,int stride, 
                                                 int H, int W,
@@ -43,7 +51,7 @@ float16 load_4x4_tile_and_transform(__global const float * restrict channel,int 
             }
         }
         else {
-            a[i] = (float4)(0.0f,0.0f,0.0f,0.0f);
+            a[i] = 0.0f;
         }
     }
 
@@ -84,15 +92,26 @@ float16 load_4x4_tile_and_transform(__global const float * restrict channel,int 
 }
 #if INTEL_PLATFORM == 1
 #define shuffle_x4(value,flag) intel_sub_group_shuffle((value),(get_sub_group_local_id() & 0xFC) | (((flag) >> ((get_sub_group_local_id() & 3) << 1)) & 3))
-#elif AMD_PLATFORM == 1
+#elif AMD_PLATFORM == 13
 #define shuffle_x4(value,flag) as_float(__builtin_amdgcn_mov_dpp(as_int(value),flag,0xF,0xF,0))
+#elif NVIDIA_PLATFORM == 1
+inline float shuffle_x4(float value,int flag)
+{
+    volatile float r;
+    int lane = get_local_id(0) + 4 * get_local_id(1);
+    int shift = (get_local_id(0) & 3) << 1;
+    //int indx =  ((flag >> shift) & 3) | (lane & 0x1C);
+    int indx =  ((flag >> shift) & 3);
+    //asm volatile ("shfl.sync.idx.b32 %0,%1,%2,3,0xFFFFFFFF;" : "=r"(r) : "r"(value), "r"(indx));
+    asm volatile ("shfl.idx.b32 %0,%1,%2,0x1C1F;" : "=r"(r) : "r"(value), "r"(indx));
+    return r;
+}
 #endif
 
 float4 load_4x4_tile_and_transform_x4(__global const float * restrict channel,int stride, 
                                                 int H, int W,
                                                 int row, int col)
 {
-    
     int l_id = get_local_id(0) % 4;
     __global const float * frame = channel + row * stride + col;
 
@@ -106,13 +125,13 @@ float4 load_4x4_tile_and_transform_x4(__global const float * restrict channel,in
         }
         else {
             int c=col;
-            my_a.s0 = c >= 0 && c < W ? frame[0] : 0.0f;
+            my_a.s0 = (c >= 0 && c < W) ? frame[0] : 0.0f;
             c++;
-            my_a.s1 = c >= 0 && c < W ? frame[1] : 0.0f;
+            my_a.s1 = (c >= 0 && c < W) ? frame[1] : 0.0f;
             c++;
-            my_a.s2 = c >= 0 && c < W ? frame[2] : 0.0f;
+            my_a.s2 = (c >= 0 && c < W) ? frame[2] : 0.0f;
             c++;
-            my_a.s3 = c >= 0 && c < W ? frame[3] : 0.0f;
+            my_a.s3 = (c >= 0 && c < W) ? frame[3] : 0.0f;
             c++;
         }
     }
@@ -136,7 +155,6 @@ float4 load_4x4_tile_and_transform_x4(__global const float * restrict channel,in
     p2.s2 = shuffle_x4(my_a.s2,sel_b);
     p2.s3 = shuffle_x4(my_a.s3,sel_b);
 
-
     float sign = (1 & (neg_b >> l_id)) ? -1.0 : 1.0;
 
     float4 bta = p1 + sign * p2;
@@ -145,8 +163,8 @@ float4 load_4x4_tile_and_transform_x4(__global const float * restrict channel,in
     btab.s0 = bta.s0 - bta.s2;
     btab.s1 = bta.s1 + bta.s2;
     btab.s2 = bta.s2 - bta.s1;
-    btab.s3 = bta.s1 - bta.s3;;
-    
+    btab.s3 = bta.s1 - bta.s3;
+   
     return btab;
 }
 
@@ -241,6 +259,7 @@ __kernel void winconv_im2tile_4x4(int BC,int H, int W,int pH,int pW,
 }
 
 
+__attribute__((reqd_work_group_size(4,8,8)))
 __kernel void winconv_im2tile_4x4_x4(int BC,int H, int W,int pH,int pW,
                                     int h_tiles,int w_tiles,
                                     __global const float * restrict data,
@@ -249,11 +268,11 @@ __kernel void winconv_im2tile_4x4_x4(int BC,int H, int W,int pH,int pW,
     int bc  = get_global_id(0) / 4;
     int r = get_global_id(1);
     int c = get_global_id(2);
-    if(bc >= BC || r >= h_tiles || c>= w_tiles)
-        return;
     int row = r * 2 - pH;
     int col = c * 2 - pW;
     float4 tile = load_4x4_tile_and_transform_x4(data + bc*H*W,W,H,W,row,col);
+    if(bc >= BC || r >= h_tiles || c>= w_tiles)
+        return;
     tiles[4*(bc * w_tiles * h_tiles + r*w_tiles + c) + get_local_id(0) % 4] = tile;
 }
 
@@ -269,10 +288,10 @@ __kernel void winconv_im2tile_4x4_x4(int BC,int H, int W,int pH,int pW,
 #endif
 
 #ifndef TILES_IN_WG
-#define TILES_IN_WG 8
+#define TILES_IN_WG 16
 #endif
 #ifndef KERNELS_IN_WG
-#define KERNELS_IN_WG 8
+#define KERNELS_IN_WG 16
 #endif
 
 #define TILES_IN_BLOCK (TILES_IN_WG / WG_DIM_TILES)
@@ -362,37 +381,47 @@ void load_tiles_priv(float res[TILE_ITEMS_PER_THREAD],__global float const *tile
 #if TILE_ITEMS_PER_THREAD == 16
 #define vstoreT(x,y,z) vstore16(x,y,z)
 #define vloadT(x,y) vload16(x,y)
+#define floatT float16
 #elif TILE_ITEMS_PER_THREAD == 8
 #define vstoreT(x,y,z) vstore8(x,y,z)
 #define vloadT(x,y) vload8(x,y)
+#define floatT float8
 #elif TILE_ITEMS_PER_THREAD == 4
 #define vstoreT(x,y,z) vstore4(x,y,z)
 #define vloadT(x,y) vload4(x,y)
+#define floatT float4
 #elif TILE_ITEMS_PER_THREAD == 2
 #define vstoreT(x,y,z) vstore2(x,y,z)
 #define vloadT(x,y) vload2(x,y)
+#define floatT float2
 #elif TILE_ITEMS_PER_THREAD == 1
 #define vstoreT(x,y,z) z[(y)] = (x)
 #define vloadT(x,y) y[x]
+#define floatT float
 #else
 #error "Unsupported configuration"
 #endif
 
 #if KERNEL_ITEMS_PER_THREAD == 16
 #define vstoreK(x,y,z) vstore16(x,y,z)
-#define vloadK(x,y,z) vload16(x,y,z)
+#define vloadK(x,y) vload16(x,y)
+#define floatK float16
 #elif KERNEL_ITEMS_PER_THREAD == 8
 #define vstoreK(x,y,z) vstore8(x,y,z)
-#define vloadK(x,y,z) vload8(x,y,z)
+#define vloadK(x,y) vload8(x,y)
+#define floatK float8
 #elif KERNEL_ITEMS_PER_THREAD == 4
 #define vstoreK(x,y,z) vstore4(x,y,z)
-#define vloadK(x,y,z) vload4(x,y,z)
+#define vloadK(x,y) vload4(x,y)
+#define floatK float4
 #elif KERNEL_ITEMS_PER_THREAD == 2
 #define vstoreK(x,y,z) vstore2(x,y,z)
-#define vloadK(x,y,z) vload2(x,y,z)
+#define vloadK(x,y) vload2(x,y)
+#define floatK float2
 #elif KERNEL_ITEMS_PER_THREAD == 1
 #define vstoreK(x,y,z) z[(y)] = (x)
 #define vloadK(x,y) y[x]
+#define floatK float
 #else
 #error "Unsupported configuration"
 #endif
@@ -410,37 +439,13 @@ void load_tiles(__local float local_tiles[LOCAL_TILES_SIZE],
 {
 
     __global float const *ldptr = tiles_base + local_tile_id * 16 + local_tile_offset * TILE_ITEMS_PER_THREAD;
-
     __local  float *stptr = &ltiles(local_tile_id,local_tile_offset,0);
 #if SIM == 1
-    #if TILE_ITEMS_PER_THREAD == 8
-        vstore8((float8)(1,2,3,4,5,6,7,8),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 4
-        vstore4((float4)(1,2,3,4),0,stptr);
-    #elif TILE_ITEMS_PER_THREAD == 2
-        vstore2((float2)(0,0),0,stptr);
-    #else
-        #error "Unsupported configuration"
-    #endif
-    
+    floatT tmp = 1.0f;
 #else
-    if(local_tile_id + wg_tile_id < total_tiles) {
-        //int off = get_local_id(1) % TILE_ITEMS_PER_THREAD;
-        //#pragma unroll
-        //for(int i=0;i<TILE_ITEMS_PER_THREAD;i++)
-        //    stptr[i] = ldptr[i];
-        //if(get_group_id(0) == 0 && get_group_id(1) == 0 && get_group_id(2) == 0) {
-        //    int th = get_local_id(1) + WG_DIM_TILES * get_local_id(2);
-        //    printf("%d -> %d\n", th,((int)(stptr) / 4) % 32);
-        //}
-        vstoreT(vloadT(0,ldptr),0,stptr);
-    }
-    else {
-        #pragma unroll
-        for(int i=0;i<TILE_ITEMS_PER_THREAD;i++)
-            stptr[i] = 0.0f;
-    }
+    floatT tmp = (local_tile_id + wg_tile_id < total_tiles) ? vloadT(0,ldptr) : 0.0f;
 #endif
+    vstoreT(tmp,0,stptr);
 }
 
 
@@ -507,6 +512,7 @@ void load_kernels_priv(float res[KERNEL_ITEMS_PER_THREAD],__global float const *
 }
 
 #endif
+
 void load_kernels(__local float local_kernels[KERNELS_IN_WG][KERNEL_ITEMS_PER_WINMAT + LOCAL_KMEM_PAD0][KERNEL_ITEMS_PER_THREAD+LOCAL_KMEM_PAD],__global float const *kernels_base,int stride_floats,int wg_kernel_id,int total_kernels,
     int local_kern_id,int local_kern_offset)
 {
@@ -514,39 +520,37 @@ void load_kernels(__local float local_kernels[KERNELS_IN_WG][KERNEL_ITEMS_PER_WI
     __local  float *stptr = local_kernels[local_kern_id][local_kern_offset];
 
 #if SIM == 1
-    #if KERNEL_ITEMS_PER_THREAD == 8
-        vstore8((float8)(1,2,3,4,5,6,7,8),0,stptr);
-    #elif KERNEL_ITEMS_PER_THREAD == 4
-        vstore4((float4)(1,2,3,4),0,stptr);
-    #elif KERNEL_ITEMS_PER_THREAD == 2
-        vstore2((float2)(1,2),0,stptr);
-    #else
-        #pragma unroll
-        for(int i=0;i<KERNEL_ITEMS_PER_THREAD;i++)
-            stptr[i]=i;
-    #endif
+    floatK tmp=1.0f;
 #else    
-
-    if(local_kern_id + wg_kernel_id < total_kernels) {
-        vstoreT(vloadT(0,ldptr),0,stptr);
-    }
-    else {
-        #pragma unroll
-        for(int i=0;i<KERNEL_ITEMS_PER_THREAD;i++)
-            stptr[i] = 0.0f;
-    }
+    floatK tmp = (local_kern_id + wg_kernel_id < total_kernels) ? (vloadK(0,ldptr)) : 0.0f;
 #endif
+    vstoreK(tmp,0,stptr);
 }
 
 
 
 
 #if INTEL_PLATFORM == 1
-#define mad_permute(sum,mp1,mp_per,line) sum = mad(mp1,intel_sub_group_shuffle(mp_per,(get_sub_group_local_id() & 0x1c) | line),sum)
+#define permute(mp_per,line) intel_sub_group_shuffle(mp_per,(get_sub_group_local_id() & 0x1c) | line)
+#define mad_permute(sum,mp1,mp_per,line) sum = mad(mp1,permute(mp_per,line),sum)
 #elif AMD_PLATFORM == 1
+#define permute(mp_per,line) __builtin_amdgcn_mov_dpp(as_int(mp_per),(line) | ((line) << 2) | ((line) << 4) | ((line) << 6) ,0xF,0xF,0)
 #define mad_permute(sum,mp1,mp_per,line) \
     __asm__ volatile ("v_mac_f32_dpp %0,%1,%2 quad_perm:[" #line "," #line  "," #line ","#line "] row_mask:0xf bank_mask:0xf " \
                     : "+v" (sum) : "v" (mp_per) , "v" (mp1)   )
+#elif NVIDIA_PLATFORM == 1
+float permute(float v,int line)
+{
+        float temp_val;
+        asm("shfl.idx.b32 %0,%1,%2,0x1C1F;" : "=r"(temp_val) : "r"(v),"r"(line) ); 
+        return temp_val;
+}
+#define mad_permute(sum,mp1,mp_per,line) \
+    do {        \
+        float temp_val; \
+        asm("shfl.idx.b32 %0,%1," #line ",0x1C1F;" : "=r"(temp_val) : "r"(mp_per) ); \
+        sum=mad((temp_val),(mp1),sum); \
+    } while(0) 
 #endif
 
 
@@ -593,7 +597,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     __global float const * tile_base    =  tiles   + 16*(batch * tiles2d * C + tile_wg_id);
 #if REV_KERNELS == 1
     __global float const * kernels_base = kernels + 16*kernel_wg_id;
-    const int kern_step = C * 16;
+    const int kern_step = oC * 16;
     const int kernels_stride = 16;
 #else
     __global float const * kernels_base = kernels + 16*(C * kernel_wg_id);
@@ -657,25 +661,56 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         #pragma unroll
         for(int dk=0;dk<KERNELS_IN_BLOCK;dk++) {
             #if USE_LOCAL_MEM == 1
-                #if USE_KSHIFT==1
+                #if USE_KSHIFT>=1
+                    float4 krtmp;
                     int my_id = get_local_id(1) % 4;
                     #if TILE_ITEMS_PER_WINMAT == 4
-                    kr = vload4(0,local_kernels[kernel_local_base + dk][my_id]);
+                    krtmp = vload4(0,local_kernels[kernel_local_base + dk][my_id]);
                     #elif TILE_ITEMS_PER_WINMAT == 8
-                    kr.s01 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2]);
-                    kr.s23 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2+1]);
+                    krtmp.s01 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2]);
+                    krtmp.s23 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2+1]);
                     #elif TILE_ITEMS_PER_WINMAT == 2
-                    kr = vload4(my_id % 2,local_kernels[kernel_local_base + dk][my_id / 2]);
+                    krtmp = vload4(my_id % 2,local_kernels[kernel_local_base + dk][my_id / 2]);
                     #elif TILE_ITEMS_PER_WINMAT == 16
-                    kr.s0 = local_kernels[kernel_local_base + dk][my_id*4+0][0];
-                    kr.s1 = local_kernels[kernel_local_base + dk][my_id*4+0][1];
-                    kr.s2 = local_kernels[kernel_local_base + dk][my_id*4+0][2];
-                    kr.s3 = local_kernels[kernel_local_base + dk][my_id*4+0][3];
+                    krtmp.s0 = local_kernels[kernel_local_base + dk][my_id*4+0][0];
+                    krtmp.s1 = local_kernels[kernel_local_base + dk][my_id*4+0][1];
+                    krtmp.s2 = local_kernels[kernel_local_base + dk][my_id*4+0][2];
+                    krtmp.s3 = local_kernels[kernel_local_base + dk][my_id*4+0][3];
                     #else
                     #error
                     #endif
+                    #if USE_KSHIFT == 2
+                    kr.s0 = permute(krtmp.s0,0);
+                    kr.s1 = permute(krtmp.s1,0);
+                    kr.s2 = permute(krtmp.s2,0);
+                    kr.s3 = permute(krtmp.s3,0);
+
+                    kr.s4 = permute(krtmp.s0,1);
+                    kr.s5 = permute(krtmp.s1,1);
+                    kr.s6 = permute(krtmp.s2,1);
+                    kr.s7 = permute(krtmp.s3,1);
+
+                    kr.s8 = permute(krtmp.s0,2);
+                    kr.s9 = permute(krtmp.s1,2);
+                    kr.sa = permute(krtmp.s2,2);
+                    kr.sb = permute(krtmp.s3,2);
+
+                    kr.sc = permute(krtmp.s0,3);
+                    kr.sd = permute(krtmp.s1,3);
+                    kr.se = permute(krtmp.s2,3);
+                    kr.sf = permute(krtmp.s3,3);
+                    #else
+                    kr = krtmp;
+                    #endif
                 #else
-                    kr = vload16(0,local_kernels[kernel_local_base + dk]);
+                    #if TILE_ITEMS_PER_WINMAT == 4
+                    kr.s0123 = vload4(0,local_kernels[kernel_local_base + dk][0]);
+                    kr.s4567 = vload4(0,local_kernels[kernel_local_base + dk][1]);
+                    kr.s89ab = vload4(0,local_kernels[kernel_local_base + dk][2]);
+                    kr.scdef = vload4(0,local_kernels[kernel_local_base + dk][3]);
+                    #else
+                    #error "TILE_ITEMS_PER_WINMAT nned to be 4"
+                    #endif
                 #endif
             #else
                 #if INV_DK==1

@@ -93,8 +93,10 @@ public:
             throw std::runtime_error("Failed to build");
         }
         kernel_conv_ = std::move(cl::Kernel(prog_,"winconv_calc_gkgt_3x3"));
+
         tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4_x4"));
         //tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
+
         win_conv_ = std::move(cl::Kernel(prog_,"winconv_3x3"));
         
         /// Query binary (PTX file) size
@@ -210,8 +212,11 @@ public:
         tiles_conv_.setArg(ind++,buf_tiled_in_);
 
         cl::NDRange tg = cl::NDRange(b_*c_ * 4,align_up(htiles_,8),align_up(wtiles_,8));
-        //cl::NDRange tg = cl::NDRange(b_*c_,align_up(htiles_,8),align_up(wtiles_,8));
+        //cl::NDRange tg = cl::NDRange(align_up(b_*c_,4),align_up(htiles_,8),align_up(wtiles_,8));
         cl::NDRange lg = cl::NDRange(4,8,8);
+        
+        //cl::NDRange tg = cl::NDRange(b_*c_,htiles_,wtiles_);
+        //cl::NDRange lg = cl::NullRange;
 
         queue_.enqueueNDRangeKernel(tiles_conv_,
                                         cl::NullRange,
@@ -224,6 +229,8 @@ public:
         kernel_conv_.setArg(ind++,buf_conv_kern_);
         cl::NDRange gk(align_up(out_c_,8),align_up(c_,8));
         cl::NDRange gl(8,8);
+        //cl::NDRange gk(out_c_,c_);
+        //cl::NDRange gl = cl::NullRange;
         queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,gk,gl,nullptr,&ev[1]);
         
         ind=0;
