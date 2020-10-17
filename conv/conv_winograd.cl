@@ -3,7 +3,7 @@
 #define REV_KERNELS 0
 #define USE_LOCAL_MEM 1
 
-#define LOCAL_TMEM_PAD 4
+#define LOCAL_TMEM_PAD 2
 #define LOCAL_TMEM_PAD0 0
 #define LOCAL_TMEM_PADX 1
 
@@ -556,7 +556,6 @@ float permute(float v,int line)
     } while(0) 
 #endif
 
-
 __kernel 
 __attribute__((reqd_work_group_size(1,WG_DIM_TILES, WG_DIM_KERNELS)))
 //__attribute__((intel_reqd_sub_group_size(8)))
@@ -609,7 +608,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 #endif
 
     float my_tiles[TILE_ITEMS_PER_THREAD];
-    float tvs[KERNELS_IN_BLOCK][16];
+    float tvs[TILES_IN_BLOCK][16];
     #if USE_KSHIFT==1
     float4 kr;
     float4 krs[KERNELS_IN_BLOCK];
@@ -630,18 +629,19 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         
         #if USE_LOCAL_MEM == 1
         {
-#if SIM==1
-                floatT tmpt = 1.0f;
-                floatT tmpk = 2.5f;
-#else
+                #if SIM==1
+                floatT tmpt = tile_load_flag ? 3.14f : 0.0f;
+                floatK tmpk = kern_load_flag ? 2.00f : 0.0f;
+                #else
                 floatT tmpt = tile_load_flag ? vloadT(0,gtiles_ptr) : 0.0f;
                 floatK tmpk = kern_load_flag ? vloadK(0,gkernels_ptr) : 0.0f;
                 gtiles_ptr += tiles2d*16;
                 gkernels_ptr += kern_step;
-#endif                
+                #endif                
                 vstoreT(tmpt,0,ltiles_ptr);
                 vstoreK(tmpk,0,lkernels_ptr);
         }
+
         barrier(CLK_LOCAL_MEM_FENCE);
         
          
@@ -684,18 +684,18 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
                 #if USE_KSHIFT>=1
                     float4 krtmp;
                     int my_id = get_local_id(1) % 4;
-                    #if TILE_ITEMS_PER_WINMAT == 4
+                    #if KERNEL_ITEMS_PER_WINMAT == 2
+                    krtmp = vload4(my_id % 2,local_kernels[kernel_local_base + dk][my_id / 2]);
+                    #elif KERNEL_ITEMS_PER_WINMAT == 4
                     krtmp = vload4(0,local_kernels[kernel_local_base + dk][my_id]);
-                    #elif TILE_ITEMS_PER_WINMAT == 8
+                    #elif KERNEL_ITEMS_PER_WINMAT == 8
                     krtmp.s01 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2]);
                     krtmp.s23 = vload2(0,local_kernels[kernel_local_base + dk][my_id*2+1]);
-                    #elif TILE_ITEMS_PER_WINMAT == 2
-                    krtmp = vload4(my_id % 2,local_kernels[kernel_local_base + dk][my_id / 2]);
-                    #elif TILE_ITEMS_PER_WINMAT == 16
+                    #elif KERNEL_ITEMS_PER_WINMAT == 16
                     krtmp.s0 = local_kernels[kernel_local_base + dk][my_id*4+0][0];
-                    krtmp.s1 = local_kernels[kernel_local_base + dk][my_id*4+0][1];
-                    krtmp.s2 = local_kernels[kernel_local_base + dk][my_id*4+0][2];
-                    krtmp.s3 = local_kernels[kernel_local_base + dk][my_id*4+0][3];
+                    krtmp.s1 = local_kernels[kernel_local_base + dk][my_id*4+1][0];
+                    krtmp.s2 = local_kernels[kernel_local_base + dk][my_id*4+2][0];
+                    krtmp.s3 = local_kernels[kernel_local_base + dk][my_id*4+3][0];
                     #else
                     #error
                     #endif
@@ -723,7 +723,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
                     kr = krtmp;
                     #endif
                 #else
-                    #if TILE_ITEMS_PER_WINMAT == 8
+                    #if KERNEL_ITEMS_PER_WINMAT == 8
                     kr.lo.lo.lo = vload2(0,local_kernels[kernel_local_base + dk][0]);
                     kr.lo.lo.hi = vload2(0,local_kernels[kernel_local_base + dk][1]);
                     kr.lo.hi.lo = vload2(0,local_kernels[kernel_local_base + dk][2]);
@@ -732,16 +732,16 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
                     kr.hi.lo.hi = vload2(0,local_kernels[kernel_local_base + dk][5]);
                     kr.hi.hi.lo = vload2(0,local_kernels[kernel_local_base + dk][6]);
                     kr.hi.hi.hi = vload2(0,local_kernels[kernel_local_base + dk][7]);
-                    #elif TILE_ITEMS_PER_WINMAT == 4
+                    #elif KERNEL_ITEMS_PER_WINMAT == 4
                     kr.lo.lo = vload4(0,local_kernels[kernel_local_base + dk][0]);
                     kr.lo.hi = vload4(0,local_kernels[kernel_local_base + dk][1]);
                     kr.hi.lo = vload4(0,local_kernels[kernel_local_base + dk][2]);
                     kr.hi.hi = vload4(0,local_kernels[kernel_local_base + dk][3]);
-                    #elif TILE_ITEMS_PER_WINMAT == 2
+                    #elif KERNEL_ITEMS_PER_WINMAT == 2
                     kr.lo = vload8(0,local_kernels[kernel_local_base + dk][0]);
                     kr.hi = vload8(0,local_kernels[kernel_local_base + dk][1]);
                     #else
-                    #error "TILE_ITEMS_PER_WINMAT need to be one of 2,4,8"
+                    #error "KERNEL_ITEMS_PER_WINMAT need to be one of 2,4,8"
                     #endif
                 #endif
             #else
@@ -794,11 +794,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
                 mad_permute(s[dt][dk].se,tvs[dt][14],kr.s2,3);
                 mad_permute(s[dt][dk].sf,tvs[dt][15],kr.s3,3);
                 #else
-                float16 tv=(float16)(
-                    tvs[dt][0],tvs[dt][1],tvs[dt][2],tvs[dt][3],
-                    tvs[dt][4],tvs[dt][5],tvs[dt][6],tvs[dt][7],
-                    tvs[dt][8],tvs[dt][9],tvs[dt][10],tvs[dt][11],
-                    tvs[dt][12],tvs[dt][13],tvs[dt][14],tvs[dt][15]);
+                float16 tv = vload16(0,tvs[dt]);
                 s[dt][dk] = mad(tv,kr,s[dt][dk]);
                 #endif
             }
@@ -1118,3 +1114,4 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
 }
 
 #endif
+
