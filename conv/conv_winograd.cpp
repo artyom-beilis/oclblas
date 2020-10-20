@@ -33,7 +33,7 @@ public:
         #ifndef MYKERNEL_PATH
         #define MYKERNEL_PATH 
         #endif
-        std::ifstream tmp(MYKERNEL_PATH "conv_winograd.cl");
+        std::ifstream tmp(MYKERNEL_PATH "conv_winograd2.cl");
         std::ostringstream ss;
         ss << tmp.rdbuf();
         return ss.str();
