@@ -1,0 +1,136 @@
+diff --git a/conv/conv_winograd2.cl b/conv/conv_winograd2.cl
+index 6479862..1a4016f 100644
+--- a/conv/conv_winograd2.cl
++++ b/conv/conv_winograd2.cl
+@@ -34,6 +34,7 @@
+ #   define USE_KSHIFT 0
+ #endif
+ 
++
+ float16 load_4x4_tile_and_transform(__global const float * restrict channel,int stride, 
+                                                 int H, int W,
+                                                 int row, int col)
+@@ -394,8 +395,10 @@ __kernel void winconv_im2tile_4x4_x4(int BC,int H, int W,int pH,int pW,
+ #define LOCAL_TILES_D1 (TILE_ITEMS_PER_THREAD + LOCAL_TMEM_PAD)
+ #define LOCAL_TILES_D2 (TILE_ITEMS_PER_WINMAT + LOCAL_TMEM_PAD0)
+ #define LOCAL_TILES_F2 (LOCAL_TILES_D1 * LOCAL_TILES_D2 + LOCAL_TMEM_PADX)
+-#define ltiles(a,b,c) local_tiles[(a) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
+-#define LOCAL_TILES_SIZE (TILES_IN_WG * LOCAL_TILES_F2)
++#define ltiles(a,b,c) local_tiles[ ((a) / 8) * (LOCAL_TILES_F2*8+16) +   ((a) & 7) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
++#define LOCAL_TILES_SIZE (TILES_IN_WG * (LOCAL_TILES_F2+16))
++//#define ltiles(a,b,c) local_tiles[ (a) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
++//#define LOCAL_TILES_SIZE (TILES_IN_WG * LOCAL_TILES_F2)
+ 
+ #if INTEL_PLATFORM == 1
+ #define permute(mp_per,line) intel_sub_group_shuffle(mp_per,(get_sub_group_local_id() & 0x1c) | line)
+@@ -429,6 +432,13 @@ float permute(float v,int line)
+ #define TILES_IN_SUBSET   (TILES_IN_WG / SUBSETS_T)
+ #define KERNELS_IN_SUBSET (KERNELS_IN_WG / SUBSETS_K)
+ 
++
++//#define lsum(gid,lid,i) &local_sum[(((i) + (lid) * 17) * 2 + ((gid) & 1)) +  SUBSET_SIZE * (SUBSET_SIZE + 1)  * 2 * ((gid)>>1)]
++#define lsum(gid,lid,i) &local_sum[gid][lid][i]
++//#define LSUMS_SIZE [SUBSETS * SUBSET_SIZE * (SUBSET_SIZE + 1)]
++#define LSUMS_SIZE [TILES_IN_WG][KERNELS_IN_WG][(SUBSET_SIZE + 1)]
++
++
+ __kernel 
+ __attribute__((reqd_work_group_size(1,WG_DIM_TILES, WG_DIM_KERNELS)))
+ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+@@ -441,7 +451,8 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+     __local float local_tiles[LOCAL_TILES_SIZE]; 
+     __local float local_kernels[KERNELS_IN_WG][KERNEL_ITEMS_PER_WINMAT + LOCAL_KMEM_PAD0][KERNEL_ITEMS_PER_THREAD + LOCAL_KMEM_PAD];
+     #endif
+-    __local float local_sum[TILES_IN_WG][KERNELS_IN_WG][SUBSET_SIZE + 1];
++    __local float local_sum[TILES_IN_WG][KERNELS_IN_WG][SUBSET_SIZE+1];
++    //__local float local_sum LSUMS_SIZE;
+     float ts[TILES_IN_SUBSET];
+     float ks[KERNELS_IN_SUBSET];
+     float s[TILES_IN_SUBSET][KERNELS_IN_SUBSET]={};
+@@ -470,14 +481,15 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+     int local_kern_offset = local_wg_id % (16 / KERNEL_ITEMS_PER_THREAD );
+ #endif
+ 
++    int subgr_id  = local_wg_id / SUBSET_SIZE;
+     int tile0 = get_local_id(1) / SUBSET_SIZE1D * TILES_IN_SUBSET;
+     int kern0 = get_local_id(2) / SUBSET_SIZE1D * KERNELS_IN_SUBSET;
+ 
+     int subset_local_id = get_local_id(1) % SUBSET_SIZE1D + (get_local_id(2) % SUBSET_SIZE1D) * SUBSET_SIZE1D;
+ 
+-    int tind = subset_local_id / TILE_ITEMS_PER_THREAD;
++    int tind = subset_local_id / TILE_ITEMS_PER_THREAD; // % TILE_ITEMS_PER_WINMAT;
+     int toff = subset_local_id % TILE_ITEMS_PER_THREAD;
+-    int kind = subset_local_id / KERNEL_ITEMS_PER_THREAD;
++    int kind = subset_local_id / KERNEL_ITEMS_PER_THREAD; // % KERNEL_ITEMS_PER_WINMAT;
+     int koff = subset_local_id % KERNEL_ITEMS_PER_THREAD;
+ 
+     int tiles2d = tilesH * tilesW;
+@@ -519,11 +531,21 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+         barrier(CLK_LOCAL_MEM_FENCE);
+ 
+         #pragma unroll
+-        for(int dt = 0;dt < TILES_IN_SUBSET ; dt ++)
++        for(int dt = 0;dt < TILES_IN_SUBSET ; dt ++) {
++            /*if(channel == 0 && get_global_id(0) == 0 && get_group_id(1) == 0 && get_group_id(2) == 0 && get_local_id(2) < 4 && dt==0) {
++                int addr = &ltiles(tile0 + dt,tind,toff) - &ltiles(0,0,0);
++                printf("%d,%d,%d,%d,%d,%d\n",local_wg_id,addr % 32,addr,tile0 + dt,tind,toff);
++            }*/
+             ts[dt] = ltiles(tile0 + dt,tind,toff);
++        }
+         #pragma unroll
+-        for(int dk = 0;dk < KERNELS_IN_SUBSET ; dk ++)
++        for(int dk = 0;dk < KERNELS_IN_SUBSET ; dk ++) {
++            /*if(channel == 0 && get_global_id(0) == 0 && get_group_id(1) == 0 && get_group_id(2) == 0 && get_local_id(2) < 4 && dk==0) {
++                int addr = &local_kernels[kern0 + dk][kind][koff] - local_kernels[0][0];
++                printf("%02d:%d -> %d\n",addr % 32,addr,local_wg_id);
++            }*/
+             ks[dk] = local_kernels[kern0 + dk][kind][koff];
++        }
+ 
+         #pragma unroll
+         for(int dt=0;dt<TILES_IN_SUBSET;dt++) {
+@@ -536,15 +558,23 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+     }
+ 
+     
+-    
+     //printf("k0=%d+%d t0=%d+%d sid=%d\n",kern0,KERNELS_IN_SUBSET,tile0,TILES_IN_SUBSET,subset_local_id);
++    int p=0;
+     #pragma unroll
+     for(int dt=0;dt < TILES_IN_SUBSET;dt++) {
+         #pragma unroll
+-        for(int dk=0;dk < KERNELS_IN_SUBSET;dk++) {
++        for(int dk=0;dk < KERNELS_IN_SUBSET;dk++,p++) {
+             //if(kern0 + dk == 0 && tile0 + dt == 4)
+             //    printf("%d:%f \n",subset_local_id,s[dt][dk]);
+-            local_sum[tile0 + dt][kern0 + dk][subset_local_id] = s[dt][dk];
++            //int off = get_local_id(1) + get_local_id(2) * WG_DIM_TILES;
++            /*__local volatile float *ptr =  lsum(subgr_id,p %  16,subset_local_id);
++            if(get_group_id(0) == 0 && get_group_id(1) == 0 && get_group_id(2) == 0 && get_local_id(2) < 4 && dt==0 && dk==0) {
++                int diff = (ptr - lsum(0,0,0)) % 32;
++                printf("t0=%d k0=%d diff=%d lid=%d\n",tile0,kern0,diff,(int)(get_local_id(1) + get_local_id(2) * 8));
++            }
++            *ptr = s[dt][dk];*/
++            volatile float v=s[dt][dk];
++            local_sum[tile0 + dt][kern0 + dk][subset_local_id] = v;
+         }
+     }
+     
+@@ -565,7 +595,16 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
+         for(int dt=0;dt<TILES_IN_BLOCK;dt++) {
+             int local_tile = tile_local_base + dt;
+             int tid = tile_row_col + dt;
+-            float16 tile16 = vload16(0,local_sum[local_tile][local_kern]);
++            ////__local float *addr = &local_sum[local_tile][local_kern][0];
++            //__local float *addr = &local_sum[local_tile][local_kern][0];
++            float16 tile16 = vload16(0,lsum(local_tile,local_kern,0));
++            //float16 tile16 = vload16(0,local_sum[local_tile][local_kern]);
++            //float16 tile16 = 1.0f;
++            /*if(get_group_id(0)==0 && get_group_id(1) == 0 && get_group_id(2) == 0) {
++                int lock_step=dk * TILES_IN_BLOCK + dt;
++                printf("LS=%05d %d.%d  %d\n",lock_step,(int)(get_local_id(1)),(int)(get_local_id(2)),
++                        (int)(addr - local_sum[0][0]));
++            }*/
+             //printf("t=%d,k=%d %f %f %f %f\n",local_tile,local_kern,tile16.s0,tile16.s1,tile16.s2,tile16.s3);
+             float4 tile_res = tile4x4_after_wingorad_to_2x2(tile16);
+             int offset = off0+ 2 * (crow * oW + ccol);
