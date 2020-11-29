@@ -3,7 +3,7 @@
 #define REV_KERNELS 0
 #define USE_LOCAL_MEM 1
 
-#define LOCAL_TMEM_PAD 2
+#define LOCAL_TMEM_PAD 4
 #define LOCAL_TMEM_PAD0 0
 #define LOCAL_TMEM_PADX 1
 

@@ -3,7 +3,7 @@
 #define REV_KERNELS 0
 #define USE_LOCAL_MEM 1
 
-#define LOCAL_TMEM_PAD 1
+#define LOCAL_TMEM_PAD 0
 #define LOCAL_TMEM_PAD0 0
 #define LOCAL_TMEM_PADX 0
 
@@ -394,7 +394,41 @@ __kernel void winconv_im2tile_4x4_x4(int BC,int H, int W,int pH,int pW,
 #define LOCAL_TILES_D1 (TILE_ITEMS_PER_THREAD + LOCAL_TMEM_PAD)
 #define LOCAL_TILES_D2 (TILE_ITEMS_PER_WINMAT + LOCAL_TMEM_PAD0)
 #define LOCAL_TILES_F2 (LOCAL_TILES_D1 * LOCAL_TILES_D2 + LOCAL_TMEM_PADX)
-#define ltiles(a,b,c) local_tiles[(a) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
+inline int swap_bits(int x)
+{
+    int bit_diff = ((x >> 3) ^ x) & 1;
+    x ^= bit_diff << 3;
+    x ^= bit_diff;
+    return x;
+}
+inline float select(float4 x,int i)
+{
+    switch(i) {
+    case 0: return x.s0;
+    case 1: return x.s1;
+    case 2: return x.s2;
+    case 3: return x.s3;
+    }
+}
+
+int4 get_selectm(int i)
+{
+    switch(i) {
+    case 0: return (int4)(-1,0,0,0);
+    case 1: return (int4)(0,-1,0,0);
+    case 2: return (int4)(0,0,-1,0);
+    case 3: return (int4)(0,0,0,-1);
+    }
+
+}
+inline float selectm(float4 x,int4 mask)
+{
+    int4 tmp = as_int4(x) & mask;
+    return as_float(tmp.s0 | tmp.s1 | tmp.s2 | tmp.s3);
+}
+
+#define ltiles(a,b,c) local_tiles[swap_bits(a) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
+//#define ltiles(a,b,c) local_tiles[(a) * LOCAL_TILES_F2 + (b) * LOCAL_TILES_D1 + (c)] 
 #define LOCAL_TILES_SIZE (TILES_IN_WG * LOCAL_TILES_F2)
 
 #if INTEL_PLATFORM == 1
@@ -441,7 +475,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     __local float local_tiles[LOCAL_TILES_SIZE]; 
     __local float local_kernels[KERNELS_IN_WG][KERNEL_ITEMS_PER_WINMAT + LOCAL_KMEM_PAD0][KERNEL_ITEMS_PER_THREAD + LOCAL_KMEM_PAD];
     #endif
-    __local float local_sum[TILES_IN_WG][KERNELS_IN_WG][SUBSET_SIZE + 1];
+    __local float local_sum[TILES_IN_WG][KERNELS_IN_WG][SUBSET_SIZE];
     float ts[TILES_IN_SUBSET];
     float ks[KERNELS_IN_SUBSET];
     float s[TILES_IN_SUBSET][KERNELS_IN_SUBSET]={};
@@ -492,6 +526,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     const int kernels_stride = 16 * C;
 #endif
 
+    local_tile_id = swap_bits(local_tile_id);
     __global float const *gtiles_ptr = tile_base + local_tile_id * 16 + local_tile_offset * TILE_ITEMS_PER_THREAD;
     __local  float *ltiles_ptr = &ltiles(local_tile_id,local_tile_offset,0);
     bool tile_load_flag =  (local_tile_id + tile_wg_id < tiles_no);
@@ -500,19 +535,54 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
     __local float *lkernels_ptr = local_kernels[local_kern_id][local_kern_offset];
     bool kern_load_flag = (local_kern_id + kernel_wg_id < oC);
 
+    int my_offset = local_wg_id / 8 % 4; 
+    int m0 = (my_offset + 0) % 4;
+    int m1 = (my_offset + 1) % 4;
+    int m2 = (my_offset + 2) % 4;
+    int m3 = (my_offset + 3) % 4;
+
+    int4 ms0 = get_selectm(m0);
+    int4 ms1 = get_selectm(m1);
+    int4 ms2 = get_selectm(m2);
+    int4 ms3 = get_selectm(m3);
+
+    __local float *ltiles_ptr0 = ltiles_ptr + m0;
+    __local float *ltiles_ptr1 = ltiles_ptr + m1;
+    __local float *ltiles_ptr2 = ltiles_ptr + m2;
+    __local float *ltiles_ptr3 = ltiles_ptr + m3;
+
     for(int channel=0;channel<C;channel++) {
         
         {
                 #if SIM==1
-                floatT tmpt = tile_load_flag ? 3.14f : 0.0f;
-                floatK tmpk = kern_load_flag ? 2.00f : 0.0f;
+                volatile floatT tmpt = tile_load_flag ? 3.14f : 0.0f;
+                volatile floatK tmpk = kern_load_flag ? 2.00f : 0.0f;
+                #else
+                
+                #if 1
+                floatT tmpt = tile_load_flag ? (float4)(gtiles_ptr[m0],gtiles_ptr[m1],gtiles_ptr[m2],gtiles_ptr[m3]) : 0.0f;
                 #else
                 floatT tmpt = tile_load_flag ? vloadT(0,gtiles_ptr) : 0.0f;
+                #endif
                 floatK tmpk = kern_load_flag ? vloadK(0,gkernels_ptr) : 0.0f;
+                
+                #endif  // SIM
                 gtiles_ptr += tiles2d*16;
                 gkernels_ptr += kern_step;
-                #endif                
+
+                #if 0
                 vstoreT(tmpt,0,ltiles_ptr);
+                #elif 1
+                ltiles_ptr[m0] = tmpt.s0;
+                ltiles_ptr[m1] = tmpt.s1;
+                ltiles_ptr[m2] = tmpt.s2;
+                ltiles_ptr[m3] = tmpt.s3;
+                #else
+                *ltiles_ptr0 = selectm(tmpt,ms0);
+                *ltiles_ptr1 = selectm(tmpt,ms1);
+                *ltiles_ptr2 = selectm(tmpt,ms2);
+                *ltiles_ptr3 = selectm(tmpt,ms3);
+                #endif
                 vstoreK(tmpk,0,lkernels_ptr);
         }
 
@@ -535,6 +605,7 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
+    //return;
     
     
     //printf("k0=%d+%d t0=%d+%d sid=%d\n",kern0,KERNELS_IN_SUBSET,tile0,TILES_IN_SUBSET,subset_local_id);
@@ -544,10 +615,13 @@ void winconv_3x3(int B, int C,int oC, int oH, int oW,int tilesH,int tilesW,
         for(int dk=0;dk < KERNELS_IN_SUBSET;dk++) {
             //if(kern0 + dk == 0 && tile0 + dt == 4)
             //    printf("%d:%f \n",subset_local_id,s[dt][dk]);
+            //__local float * volatile ptr = &local_sum[tile0 + dt][kern0 + dk][subset_local_id];
+            //*ptr = s[dt][dk];
             local_sum[tile0 + dt][kern0 + dk][subset_local_id] = s[dt][dk];
+            //volatile float x=s[dt][dk];
         }
     }
-    
+    //return;
     barrier(CLK_LOCAL_MEM_FENCE);
 
     int oHW = oH*oW;

@@ -9,6 +9,8 @@
 
 #include <CL/cl.hpp>
 
+#define VER 1
+
 class conv_winograd : public conv_base {
 public:
 
@@ -33,7 +35,11 @@ public:
         #ifndef MYKERNEL_PATH
         #define MYKERNEL_PATH 
         #endif
+#if VER == 1
+        std::ifstream tmp(MYKERNEL_PATH "conv_winograd.cl");
+#else
         std::ifstream tmp(MYKERNEL_PATH "conv_winograd2.cl");
+#endif
         std::ostringstream ss;
         ss << tmp.rdbuf();
         return ss.str();
