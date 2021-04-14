@@ -111,8 +111,8 @@ inline float shuffle_x4_func(float value,int flag)
     int lane = get_local_id(0) + 4 * get_local_id(1);
     int shift = (get_local_id(0) & 3) << 1;
     int indx =  ((flag >> shift) & 3);
-    //asm volatile ("shfl.sync.idx.b32 %0,%1,%2,0x1C1F,0xFFFFFFFF;" : "=r"(r) : "r"(value), "r"(indx));
-    asm volatile ("shfl.idx.b32 %0,%1,%2,0x1C1F;" : "=r"(r) : "r"(value), "r"(indx));
+    asm volatile ("shfl.sync.idx.b32 %0,%1,%2,0x1C1F,0xFFFFFFFF;" : "=r"(r) : "r"(value), "r"(indx));
+    //asm volatile ("shfl.idx.b32 %0,%1,%2,0x1C1F;" : "=r"(r) : "r"(value), "r"(indx));
     return r;
 }
 #define shuffle_x4(a,b) shuffle_x4_func(a,b)
@@ -545,13 +545,13 @@ void load_kernels_priv(float res[KERNEL_ITEMS_PER_THREAD],__global float const *
 float permute(float v,int line)
 {
         float temp_val;
-        asm("shfl.idx.b32 %0,%1,%2,0x1C1F;" : "=r"(temp_val) : "r"(v),"r"(line) ); 
+        asm("shfl.sync.idx.b32 %0,%1,%2,0x1C1F,0xFFFFFFFF;" : "=r"(temp_val) : "r"(v),"r"(line) ); 
         return temp_val;
 }
 #define mad_permute(sum,mp1,mp_per,line) \
     do {        \
         float temp_val; \
-        asm("shfl.idx.b32 %0,%1," #line ",0x1C1F;" : "=r"(temp_val) : "r"(mp_per) ); \
+        asm("shfl.sync.idx.b32 %0,%1," #line ",0x1C1F,0xFFFFFFFF;" : "=r"(temp_val) : "r"(mp_per) ); \
         sum=mad((temp_val),(mp1),sum); \
     } while(0) 
 #endif

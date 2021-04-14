@@ -49,7 +49,8 @@ public:
     {
         float alpha = 1.0f;
         float betha = 0.0f;
-        cublasSgemm(h_,
+        cublasStatus_t status;
+	status = cublasSgemm(h_,
                     (Btr_ ? CUBLAS_OP_T : CUBLAS_OP_N), (Atr_ ? CUBLAS_OP_T : CUBLAS_OP_N),
                     N_,M_,K_,
                     &alpha,
@@ -57,6 +58,8 @@ public:
                     a_,(!Atr_?K_:M_),
                     &betha,
                     c_,N_);
+	if(status != CUBLAS_STATUS_SUCCESS)
+		throw std::runtime_error("sgemm failed");
     }
     virtual void sync() {
         cudaDeviceSynchronize();

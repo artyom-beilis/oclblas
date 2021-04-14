@@ -69,7 +69,7 @@ public:
 	cudnnTensorDescriptor_t inp_,out_;
 	cudnnFilterDescriptor_t ker_;
 	cudnnConvolutionDescriptor_t desc_;
-	cudnnConvolutionFwdAlgo_t perf_;
+	cudnnConvolutionFwdAlgoPerf_t perf_;
 	buffer buf_in_,buf_out_,buf_kern_,buf_ws_;
 
 	size_t ws_size_;
@@ -124,12 +124,10 @@ public:
 			throw std::runtime_error("Invalid shape");
 		}
 		
-		check(cudnnGetConvolutionForwardAlgorithm(handle_,inp_,ker_,desc_,out_,CUDNN_CONVOLUTION_FWD_PREFER_FASTEST,0,&perf_));
-		//perf_ = (cudnnConvolutionFwdAlgo_t)6;
-        //std::cerr << "alogo=" << int(perf_) << std::endl;
+		int algs = 0;
+		check(cudnnFindConvolutionForwardAlgorithm(handle_,inp_,ker_,desc_,out_,1,&algs,&perf_));
 
-		ws_size_ = 0;
-		check(cudnnGetConvolutionForwardWorkspaceSize(handle_,inp_,ker_,desc_,out_,perf_,&ws_size_));
+		ws_size_ = perf_.memory;
 
 		//std::cerr << "ws=" << ws_size_ << std::endl;
 
@@ -152,7 +150,7 @@ public:
 	virtual void calc() {
 		float alpha=1.0f;
 		float beta=0.0f;
-		check(cudnnConvolutionForward(handle_,&alpha,inp_,buf_in_(),ker_,buf_kern_(),desc_,perf_,buf_ws_(),ws_size_,&beta,out_,buf_out_()));
+		check(cudnnConvolutionForward(handle_,&alpha,inp_,buf_in_(),ker_,buf_kern_(),desc_,perf_.algo,buf_ws_(),ws_size_,&beta,out_,buf_out_()));
 	}
 	virtual void sync() {
      	  	cudaDeviceSynchronize();
