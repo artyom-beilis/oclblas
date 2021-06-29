@@ -1,4 +1,4 @@
-//#define __CL_ENABLE_EXCEPTIONS
+#define __CL_ENABLE_EXCEPTIONS
 #include "conv_base.h"
 #include <stdexcept>
 #include <iostream>
@@ -8,8 +8,6 @@
 #include <stdexcept>
 
 #include <CL/cl.hpp>
-
-#define VER 1
 
 class conv_winograd : public conv_base {
 public:
@@ -35,11 +33,7 @@ public:
         #ifndef MYKERNEL_PATH
         #define MYKERNEL_PATH 
         #endif
-#if VER == 1
-        std::ifstream tmp(MYKERNEL_PATH "conv_winograd.cl");
-#else
-        std::ifstream tmp(MYKERNEL_PATH "conv_winograd2.cl");
-#endif
+        std::ifstream tmp(MYKERNEL_PATH "conv_winograd_t2.cl");
         std::ostringstream ss;
         ss << tmp.rdbuf();
         return ss.str();
@@ -66,16 +60,16 @@ public:
     void build()
     {
         std::string header,log;
-        tiles_in_wg_ = 16;
-        kerns_in_wg_ = 16;
+        tiles_in_wg_ = 32;
+        kerns_in_wg_ = 32;
         wgdim_t_ = 8;
         wgdim_k_ = 8;
         so4_ = 0;
-        make_param(tiles_in_wg_,"T_INWG","TILES_IN_WG",header,log);
-        make_param(kerns_in_wg_,"K_INWG","KERNELS_IN_WG",header,log);
-        make_param(wgdim_t_,"WGDIM_T","WG_DIM_TILES",header,log);
-        make_param(wgdim_k_,"WGDIM_K","WG_DIM_KERNELS",header,log);
-        make_param(so4_,"SO4","SUM_OF_4",header,log);
+        //make_param(tiles_in_wg_,"T_INWG","TILES_IN_WG",header,log);
+        //make_param(kerns_in_wg_,"K_INWG","KERNELS_IN_WG",header,log);
+        //make_param(wgdim_t_,"WGDIM_T","WG_DIM_TILES",header,log);
+        //make_param(wgdim_k_,"WGDIM_K","WG_DIM_KERNELS",header,log);
+        //make_param(so4_,"SO4","SUM_OF_4",header,log);
         block_t_ = tiles_in_wg_/wgdim_t_;
         block_k_ = kerns_in_wg_/wgdim_k_;
         std::string src = header + get_kernel();
@@ -90,17 +84,21 @@ public:
         if(getenv("SAVE_TEMPS")) {
             extra = "-save-temps=./ ";
         }
-        if((rc=prog_.build(devices,extra))!=0) {
+        try {
+            rc=prog_.build(devices,extra);
+        }
+        catch(...) {
             size_t len=0;
             static char buffer[16384*32];
             clGetProgramBuildInfo(prog_(), devices[0](), CL_PROGRAM_BUILD_LOG, sizeof(buffer)-1, buffer, &len);
             buffer[std::min(len,sizeof(buffer)-1)]=0;
-            std::cerr << "FAILED: rc="<<rc <<"\n" << buffer << std::endl;
-            throw std::runtime_error("Failed to build");
+            std::cout << "LOG: rc="<<rc <<"\n" << buffer << std::endl;
+            if(rc != 0)
+                throw std::runtime_error("Failed to build");
         }
         kernel_conv_ = std::move(cl::Kernel(prog_,"winconv_calc_gkgt_3x3"));
 
-        tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4_x4"));
+        //tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4_x4"));
         //tiles_conv_ = std::move(cl::Kernel(prog_,"winconv_im2tile_4x4"));
 
         win_conv_ = std::move(cl::Kernel(prog_,"winconv_3x3"));
@@ -169,7 +167,7 @@ public:
 	virtual void config(conv_param const &param,int B,int C,int H,int W)
 	{
 		conv_base::config(param,B,C,H,W);
-        if(param.stride_h != 1 || param.stride_w != 1 || param.kernel_w != 3 || param.kernel_h != 3)
+        if(param.stride_h != 1 || param.stride_w != 1 || param.kernel_w != 3 || param.kernel_h != 3 || param.pad_h != 1 || param.pad_w != 1)
             throw std::runtime_error("Unsupported");
 
         buf_in_ =   std::move(dalloc( b_*c_*h_*w_*sizeof(float)));
@@ -197,7 +195,60 @@ public:
     {
         return (v+gran-1)/gran*gran;
     }
+    void calc_new()
+    {
+        std::vector<cl::Event> ev(2);
+        int ind=0;
+        kernel_conv_.setArg(ind++,out_c_);
+        kernel_conv_.setArg(ind++,c_);
+        kernel_conv_.setArg(ind++,buf_kern_);
+        kernel_conv_.setArg(ind++,buf_conv_kern_);
+        cl::NDRange gk(align_up(out_c_,8),align_up(c_,8));
+        cl::NDRange gl(8,8);
+        //cl::NDRange gk(out_c_,c_);
+        //cl::NDRange gl = cl::NullRange;
+        queue_.enqueueNDRangeKernel(kernel_conv_,cl::NullRange,gk,gl,nullptr,&ev[0]);
+        
+        ind=0;
+        win_conv_.setArg(ind++,b_);
+        win_conv_.setArg(ind++,out_c_);
+        win_conv_.setArg(ind++,c_);
+        win_conv_.setArg(ind++,out_h_);
+        win_conv_.setArg(ind++,out_w_);
+        win_conv_.setArg(ind++,buf_in_);
+        win_conv_.setArg(ind++,buf_conv_kern_);
+        win_conv_.setArg(ind++,buf_out_);
+
+        int tile_dim = (htiles_*wtiles_ + block_t_ - 1) / block_t_;
+        int kern_dim = (out_c_ + block_k_ - 1) / block_k_;
+        cl::NDRange loc(256,1);
+        int tiles = ((out_h_ + 1) / 2 * (out_w_ + 1) / 2 * b_ + 31)/32;
+        cl::NDRange glob(tiles * 256,out_c_);
+        queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,&ev[1]);
+        if(getenv("PROF")) {
+            const int N = ev.size();
+            total_times_.resize(N);
+            cl::Event::waitForEvents(ev);
+            cl_ulong start=0,stop=0;
+
+            for(int i=0;i<sizeof(ev)/sizeof(ev[0]);i++)  {
+                clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_START,sizeof(start),&start,0);
+                clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_END,sizeof(stop),&stop,0);
+                total_times_[i] += (stop - start) * 1e-6;
+            }
+            counts_++;
+        }
+    }
 	virtual void calc() {
+        try {
+            calc_new();
+        }
+        catch(cl::Error const &e) {
+            std::cerr << "clError"  << e.what() << " "  << e.err() << std::endl;;
+            throw;
+        }
+    }
+	void calc_old() {
         std::vector<cl::Event> ev(3);
 		float alpha=1.0f;
 		float beta=0.0f;

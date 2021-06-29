@@ -214,6 +214,18 @@ void store_local(__local float *l_val,int strd,float16 v)
 #error
 #endif
 
+unsigned z_order_a(unsigned x)
+{
+    return ( (x & (1<<0))  >> 0 )
+         | ( (x & (1<<2))  >> 1 )  
+         | ( (x & (1<<4))  >> 2 )  
+         | ( (x & (1<<6))  >> 3 );
+}
+
+unsigned z_order_b(unsigned x)
+{
+    return z_order_a(x>>1);
+}
 
 __kernel 
 __attribute__((reqd_work_group_size(WG_SIZE,1,1)))
@@ -265,6 +277,8 @@ void winconv_3x3(int B, int N,int C,int H,int W,
 
     int my_gemm_tile_b  = get_local_id(WG_DIM) / 16;
     int my_gemm_tile_tk = get_local_id(WG_DIM) % 16;
+    //int my_gemm_tile_kr = z_order_a(my_gemm_tile_tk) * PATCH_K; 
+    //int my_gemm_tile_tl = z_order_b(my_gemm_tile_tk) * PATCH_T;
     int my_gemm_tile_kr = my_gemm_tile_tk / (TILES_IN_WG / PATCH_T) * PATCH_K;
     int my_gemm_tile_tl = my_gemm_tile_tk % (TILES_IN_WG / PATCH_T) * PATCH_T;
 
