@@ -34,6 +34,7 @@
 #   define USE_KSHIFT 0
 #endif
 
+
 float16 load_4x4_tile_and_transform(__global const float * restrict channel,int stride, 
                                                 int H, int W,
                                                 int row, int col)
@@ -184,7 +185,7 @@ __kernel void winconv_calc_gkgt_3x3(int N,int C,__global const float * restrict 
 
 #define WG_DIM 0
 
-void store_local(__local float *l_val,int strd,float16 v)
+inline void store_local(__local float *l_val,int strd,float16 v)
 {
         l_val[ 0*strd] = v.s0;
         l_val[ 1*strd] = v.s1;
@@ -238,10 +239,13 @@ void winconv_3x3(int B, int N,int C,int H,int W,
     int half_H = (H+1)/2;
     int half_WG = half_W * half_H;
 
-    __local float wg_local_memory[(TILES_IN_WG + KERNELS_IN_WG) * WG_K * 16];
+    __local float wg_local_memory[(TILES_IN_WG + KERNELS_IN_WG + 16) * WG_K * 16];
 
-#define l_tiles(a,b,c) wg_local_memory[(((a)*WG_K + (b))*TILES_IN_WG) + (c)]
-#define l_kernels(a,b,c) wg_local_memory[(((a)*WG_K + (b))*KERNELS_IN_WG) + (c) + (TILES_IN_WG*WG_K*16)]
+#define l_tile_stride (TILES_IN_WG * WG_K + 1)
+#define l_kern_stride (KERNELS_IN_WG * WG_K + 1)
+
+#define l_tiles(a,b,c) wg_local_memory[(a)*l_tile_stride + (b)*TILES_IN_WG + (c)]
+#define l_kernels(a,b,c) wg_local_memory[(a)*l_kern_stride + (b)*KERNELS_IN_WG + (c) + (TILES_IN_WG*WG_K*16 + 32)]
 
 
     // Loading data
@@ -265,10 +269,8 @@ void winconv_3x3(int B, int N,int C,int H,int W,
     image += l_b * H * W * C;
 
 
-    #define l_tile_stride (TILES_IN_WG * WG_K)
-    #define l_kern_stride (KERNELS_IN_WG * WG_K)
 
-    #define s_img_tile(k,t,indx) wg_local_memory[(k)*(TILES_IN_WG/2)*16 + (t/2) * 16 + (indx)]
+    #define s_img_tile(k,t,indx) wg_local_memory[(k)*(TILES_IN_WG/2*16 + 1) + (t/2) * 16 + (indx)]
     
     __local float *l_tile_ptr = &l_tiles(0,l_tile_k,l_tile_rc);
     __local float *l_kern_ptr = &l_kernels(0,l_kern_k,l_kern_n);
@@ -297,24 +299,11 @@ void winconv_3x3(int B, int N,int C,int H,int W,
         // load relevant kernel
         float16 my_kern = (l_feature < N && k+l_kern_k < C) ? kernels[l_feature * C + k + l_kern_k] : 0;
         store_local(l_kern_ptr,l_kern_stride,my_kern);
-/*
-        if(get_local_id(WG_DIM) == 0) {
-            printf("%f %f %f %f\n",my_tile.s0,my_tile.s1,my_tile.s2,my_tile.s3);
-            printf("%f %f %f %f\n",my_tile.s4,my_tile.s5,my_tile.s6,my_tile.s7);
-            printf("%f %f %f %f\n",my_tile.s8,my_tile.s9,my_tile.sa,my_tile.sb);
-            printf("%f %f %f %f\n",my_tile.sc,my_tile.sd,my_tile.se,my_tile.sf);
-            printf("---\n");
-            printf("%f %f %f %f\n",my_kern.s0,my_kern.s1,my_kern.s2,my_kern.s3);
-            printf("%f %f %f %f\n",my_kern.s4,my_kern.s5,my_kern.s6,my_kern.s7);
-            printf("%f %f %f %f\n",my_kern.s8,my_kern.s9,my_kern.sa,my_kern.sb);
-            printf("%f %f %f %f\n",my_kern.sc,my_kern.sd,my_kern.se,my_kern.sf);
-        }
-*/
 
         barrier(CLK_LOCAL_MEM_FENCE);
 
         // GEMM
-        #pragma unroll(4)
+        #pragma unroll
         for(int dk=0;dk<WG_K;dk++) {
             float p_kern[PATCH_K];
 
@@ -342,10 +331,11 @@ void winconv_3x3(int B, int N,int C,int H,int W,
     int s_col_t0 = tile0 % TILES_IN_WG;
     int s_row_t = tile0 / TILES_IN_WG;
 
+#define SIM_TRANS 0
 
     #pragma unroll
     for(int dc_split = 0; dc_split < 2;dc_split++) {
-        
+        #if SIM_TRANS == 0    
         // transpose part A
 
         #pragma unroll
@@ -359,20 +349,36 @@ void winconv_3x3(int B, int N,int C,int H,int W,
         }
         
         barrier(CLK_LOCAL_MEM_FENCE);
+        #endif
 
         #pragma unroll
         for(int dc = 0;dc < 4;dc+=2) {
             
             int s_col_t = s_col_t0 + dc + dc_split;
 
+            #if SIM_TRANS == 0
             float16 s_tile = vload16(0,&s_img_tile(s_row_t,s_col_t,0));
-            /*if(get_local_id(WG_DIM) == 0 && dr1 == 0 && dr2 == 0) {
-                printf("R: %d %d\n",s_row_t,s_col_t);
-                printf("R %f %f %f %f\n",s_tile.s0,s_tile.s1,s_tile.s2,s_tile.s3);
-                printf("R %f %f %f %f\n",s_tile.s4,s_tile.s5,s_tile.s6,s_tile.s7);
-                printf("R %f %f %f %f\n",s_tile.s8,s_tile.s9,s_tile.sa,s_tile.sb);
-                printf("R %f %f %f %f\n",s_tile.sc,s_tile.sd,s_tile.se,s_tile.sf);
-            }*/
+            #else
+            float16 s_tile;
+            s_tile.lo.s0 = p_C[(dc+dc_split)*2][0];
+            s_tile.lo.s1 = p_C[(dc+dc_split)*2][1];
+            s_tile.lo.s2 = p_C[(dc+dc_split)*2][2];
+            s_tile.lo.s3 = p_C[(dc+dc_split)*2][3];
+            s_tile.lo.s4 = p_C[(dc+dc_split)*2][4];
+            s_tile.lo.s5 = p_C[(dc+dc_split)*2][5];
+            s_tile.lo.s6 = p_C[(dc+dc_split)*2][6];
+            s_tile.lo.s7 = p_C[(dc+dc_split)*2][7];
+
+            s_tile.hi.s0 = p_C[(dc+dc_split)*2+1][0];
+            s_tile.hi.s1 = p_C[(dc+dc_split)*2+1][1];
+            s_tile.hi.s2 = p_C[(dc+dc_split)*2+1][2];
+            s_tile.hi.s3 = p_C[(dc+dc_split)*2+1][3];
+            s_tile.hi.s4 = p_C[(dc+dc_split)*2+1][4];
+            s_tile.hi.s5 = p_C[(dc+dc_split)*2+1][5];
+            s_tile.hi.s6 = p_C[(dc+dc_split)*2+1][6];
+            s_tile.hi.s7 = p_C[(dc+dc_split)*2+1][7];
+
+            #endif
             float4 s_img_tile = tile4x4_after_wingorad_to_2x2(s_tile);
 
             int s_brc = wg_brc + s_col_t;
@@ -388,9 +394,6 @@ void winconv_3x3(int B, int N,int C,int H,int W,
 
 
             if(s_b < B && s_feature < N) {
-                /*if(s_b == 0 && s_feature == 0 && s_row == 6 && s_col == 6)  {
-                    printf("%f %f\n%f %f %d\n",s_img_tile.s0,s_img_tile.s1,s_img_tile.s2,s_img_tile.s3);
-                }*/
                 bool rv0 = s_row < H;
                 bool rv1 = s_row + 1 < H;
                 bool cv0 = s_col < W;

@@ -1,4 +1,6 @@
-#define __CL_ENABLE_EXCEPTIONS
+#define CL_HPP_ENABLE_EXCEPTIONS
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#define CL_HPP_TARGET_OPENCL_VERSION 120
 #include "conv_base.h"
 #include <stdexcept>
 #include <iostream>
@@ -7,7 +9,7 @@
 #include <string>
 #include <stdexcept>
 
-#include <CL/cl.hpp>
+#include <CL/cl2.hpp>
 
 class conv_winograd : public conv_base {
 public:
@@ -73,11 +75,9 @@ public:
         block_t_ = tiles_in_wg_/wgdim_t_;
         block_k_ = kerns_in_wg_/wgdim_k_;
         std::string src = header + get_kernel();
-        std::cerr << log << std::endl;
         std::ofstream tmp("/tmp/out.cl");
         tmp << src;
-        cl::Program::Sources sources(1,std::make_pair(src.c_str(),src.size()));
-        prog_ = std::move(cl::Program(context_,sources));
+        prog_ = std::move(cl::Program(context_,src.c_str()));
         int rc;
         std::vector<cl::Device> devices(1,device_);
         char const *extra = "";
@@ -223,7 +223,7 @@ public:
         int kern_dim = (out_c_ + block_k_ - 1) / block_k_;
         cl::NDRange loc(256,1);
         int tiles = ((out_h_ + 1) / 2 * (out_w_ + 1) / 2 * b_ + 31)/32;
-        cl::NDRange glob(tiles * 256,out_c_);
+        cl::NDRange glob(tiles * 256,(out_c_ + 31) / 32);
         queue_.enqueueNDRangeKernel(win_conv_,cl::NullRange,glob,loc,nullptr,&ev[1]);
         if(getenv("PROF")) {
             const int N = ev.size();
@@ -231,7 +231,7 @@ public:
             cl::Event::waitForEvents(ev);
             cl_ulong start=0,stop=0;
 
-            for(int i=0;i<sizeof(ev)/sizeof(ev[0]);i++)  {
+            for(int i=0;i<int(ev.size());i++)  {
                 clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_START,sizeof(start),&start,0);
                 clGetEventProfilingInfo(ev[i](),CL_PROFILING_COMMAND_END,sizeof(stop),&stop,0);
                 total_times_[i] += (stop - start) * 1e-6;
