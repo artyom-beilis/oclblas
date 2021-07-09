@@ -1,13 +1,21 @@
 // vim: tabstop=4 expandtab shiftwidth=4 softtabstop=4
-#include <CL/cl.hpp>
+#ifndef CL_HPP_ENABLE_EXCEPTIONS
+#define CL_HPP_ENABLE_EXCEPTIONS
+#endif
+#ifndef CL_HPP_MINIMUM_OPENCL_VERSION
+#define CL_HPP_MINIMUM_OPENCL_VERSION 120
+#endif
+#ifndef CL_HPP_TARGET_OPENCL_VERSION
+#define CL_HPP_TARGET_OPENCL_VERSION 120
+#endif
+
+#include <CL/cl2.hpp>
 #include <math.h>
 #include "sgemm_base.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <sstream>
-
-#define __CL_ENABLE_EXCEPTIONS
 
 #define BLOCK_SIZE 8
 
@@ -25,6 +33,7 @@ public:
     int tile_size_n_;
     int tile_size_k_;
     int off_;
+    int zorder_;
     sgemm_my(int p,int d)  
     {
         std::vector<cl::Platform> platforms;
@@ -49,6 +58,15 @@ public:
         if(!getenv(s))
             return;
         v=atoi(getenv(s));
+    }
+
+    unsigned align_to_top2n(unsigned x)
+    {
+        unsigned v=1;
+        while(x > v) {
+            v<<= 1;
+        }
+        return v;
     }
     virtual void config(int M,int N,int K,bool Atr,bool Btr)
     {
@@ -95,6 +113,7 @@ public:
         subst(block_size_n_,"BLOCK_N");
         subst(off_,"TILE_OFFSET");
         subst(tile_size_k_,"TILE_SIZE_K");
+        subst(zorder_,"ZORDER");
         int wg_size = (tile_size_m_  * tile_size_n_ / block_size_n_ / block_size_m_);
         
         if(tile_size_m_ % block_size_m_ != 0 || tile_size_n_ % block_size_n_ != 0) {
@@ -113,7 +132,7 @@ public:
 
         if(getenv("SAVE_TEMPS"))
           opts << " -save-temps=./ ";
-        opts << " -DTILE_SIZE_M=" << tile_size_m_ << " -DTILE_SIZE_N=" << tile_size_n_ << " -DBLOCK_SIZE_N=" << block_size_n_ << " -DBLOCK_SIZE_M=" << block_size_m_ << " -DTILE_SIZE_K="<<tile_size_k_ << " -DTILE_OFFSET="<<off_;
+        opts << " -DTILE_SIZE_M=" << tile_size_m_ << " -DTILE_SIZE_N=" << tile_size_n_ << " -DBLOCK_SIZE_N=" << block_size_n_ << " -DBLOCK_SIZE_M=" << block_size_m_ << " -DTILE_SIZE_K="<<tile_size_k_ << " -DTILE_OFFSET="<<off_ << " -DZORDER=" << zorder_;
 
         if(Btr_)
             opts << " -DBTRANS";
@@ -134,25 +153,29 @@ public:
         std::ostringstream ss;
         ss << tmp.rdbuf();
         std::string src=ss.str();
-        cl::Program::Sources sources(1,std::make_pair(src.c_str(),src.size()));
-        program_ = std::move(cl::Program(context_,sources));
+//        cl::Program::Sources sources(1,std::make_pair(src.c_str(),src.size()));
+        program_ = std::move(cl::Program(context_,src.c_str()));
         
         std::vector<cl::Device> devices { device_ };
-        int rc = program_.build(devices,opts.str().c_str());
-        if(rc!=0){
-                size_t len=0;
-                static char buffer[16384*32];
-                clGetProgramBuildInfo(program_(), device_(), CL_PROGRAM_BUILD_LOG, sizeof(buffer)-1, buffer, &len);
-                buffer[std::min(len,sizeof(buffer)-1)]=0;
-                if(rc!=0)
-                    throw std::runtime_error("Failed to build program, log:\n" + std::string(buffer));
-                //if(len!=0)
-                //    std::cerr << "LOG: " << buffer << std::endl;
+        try {
+            program_.build(devices,opts.str().c_str());
+        }
+        catch(cl::BuildError const &e) {
+            std::string log;
+            auto cl_log = e.getBuildLog();
+            for(size_t i=0;i<cl_log.size();i++) {
+                log += "For device: ";
+                log += cl_log[i].first.getInfo<CL_DEVICE_NAME>();
+                log += "\n";
+                log += cl_log[i].second;
+            }
+            std::cerr << log << std::endl;
+            throw std::runtime_error("Build Failed");
         }
 
         /// Query binary (PTX file) size
         size_t bin_sz;
-        rc = clGetProgramInfo(program_(), CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &bin_sz, NULL);
+        int rc = clGetProgramInfo(program_(), CL_PROGRAM_BINARY_SIZES, sizeof(size_t), &bin_sz, NULL);
 
         // Read binary (PTX file) to memory buffer
         std::vector<unsigned char> bin(bin_sz+1);
@@ -192,16 +215,26 @@ public:
         kernel_.setArg(ind++,c_);
         kernel_.setArg(ind++,N_);
        
+        cl::NDRange g;
+
+        
         int ls0 = tile_size_m_ / block_size_m_;
         int ls1 = tile_size_n_ / block_size_n_; 
-        int gs0 = round_up_div(M_,tile_size_m_) * tile_size_m_ / block_size_m_;
-        int gs1 = round_up_div(N_,tile_size_n_) * tile_size_n_ / block_size_n_;
-        cl::NDRange global(gs0,gs1);
+        int grid_m = round_up_div(M_,tile_size_m_);
+        int grid_n = round_up_div(N_,tile_size_n_);
+        if(zorder_ == 1) {
+            int grid = align_to_top2n(std::max(grid_m,grid_n));
+            grid_m = grid_n = grid;
+        }
+        int gs0 = grid_m * ls0;
+        int gs1 = grid_n * ls1;
+        g=cl::NDRange(gs0,gs1);
         cl::NDRange local(ls0,ls1);
-        rc=queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, global,local,nullptr,nullptr);
+        rc=queue_.enqueueNDRangeKernel(kernel_, cl::NullRange, g,local,nullptr,nullptr);
 
         if(rc!=0)
             throw std::runtime_error("Failed to enqueue the kernel: " + std::to_string(rc));
+
     }
     virtual void sync() {
         queue_.finish();
